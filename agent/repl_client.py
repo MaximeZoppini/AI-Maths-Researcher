@@ -1,7 +1,7 @@
 """
 Lean 4 REPL Client for AI-Maths-Researcher.
 Provides sub-second interactive Lean 4 & Mathlib feedback over a persistent SSH connection.
-Supports command execution, goal state extraction, and tactic verification.
+Maintains a warm base Mathlib environment for zero-overhead candidate evaluation.
 """
 
 import json
@@ -53,10 +53,10 @@ class LeanREPL:
         self.project_dir = project_dir
         self.repl_bin = repl_bin
         self.process: Optional[subprocess.Popen] = None
-        self.current_env: Optional[int] = None
+        self.base_env: Optional[int] = None
 
     def start(self):
-        """Starts the persistent Lean REPL process over SSH."""
+        """Starts the persistent Lean REPL process over SSH and preloads Mathlib."""
         if self.process is not None and self.process.poll() is None:
             return
 
@@ -73,7 +73,18 @@ class LeanREPL:
             text=True,
             bufsize=1
         )
-        self.current_env = None
+        self.base_env = None
+
+        # Preload standard Mathlib modules into base_env
+        warmup_cmd = (
+            "import Mathlib.Tactic\n"
+            "import Mathlib.Algebra.Ring.Parity\n"
+            "set_option linter.style.header false\n\n"
+            "theorem __base_init__ : True := trivial"
+        )
+        resp = self.send_request({"cmd": warmup_cmd})
+        if resp.env is not None:
+            self.base_env = resp.env
 
     def close(self):
         """Terminates the REPL process."""
@@ -87,7 +98,7 @@ class LeanREPL:
                 except Exception:
                     pass
             self.process = None
-            self.current_env = None
+            self.base_env = None
 
     def __enter__(self):
         self.start()
@@ -121,14 +132,14 @@ class LeanREPL:
 
         raw_output = "".join(lines).strip()
         if not raw_output:
-            return REPLResponse(raw={}, env=self.current_env, duration_ms=duration_ms)
+            return REPLResponse(raw={}, env=self.base_env, duration_ms=duration_ms)
 
         try:
             data = json.loads(raw_output)
         except json.JSONDecodeError:
             return REPLResponse(
                 raw={"raw_error": raw_output},
-                env=self.current_env,
+                env=self.base_env,
                 messages=[REPLMessage(severity="error", data=f"Invalid JSON from REPL: {raw_output}")],
                 duration_ms=duration_ms
             )
@@ -145,11 +156,8 @@ class LeanREPL:
                 )
             )
 
-        new_env = data.get("env", self.current_env)
-        if new_env is not None:
-            self.current_env = new_env
+        new_env = data.get("env")
 
-        # Extract goals if any
         goals = []
         for m in messages:
             if "unsolved goals" in m.data:
@@ -168,17 +176,17 @@ class LeanREPL:
             duration_ms=duration_ms
         )
 
-    def check_code(self, code: str, reuse_env: bool = False) -> REPLResponse:
+    def check_code(self, code: str) -> REPLResponse:
         """
-        Executes a Lean code block.
-        If reuse_env is True and an environment is active, reuses it to avoid re-importing.
+        Executes candidate Lean code in the preloaded Mathlib base environment.
+        Strips redundant import lines since Mathlib is already in memory.
         """
-        payload: Dict[str, Any] = {"cmd": code}
-        if reuse_env and self.current_env is not None:
-            payload["env"] = self.current_env
-        return self.send_request(payload)
+        # Strip import statements for REPL execution against base_env
+        cleaned_lines = [l for l in code.splitlines() if not l.strip().startswith("import ")]
+        cleaned_code = "\n".join(cleaned_lines).strip()
 
-    def run_tactic(self, tactic: str, proof_state: int) -> REPLResponse:
-        """Executes a tactic on an existing proofState ID."""
-        payload = {"tactic": tactic, "proofState": proof_state}
+        payload: Dict[str, Any] = {"cmd": cleaned_code}
+        if self.base_env is not None:
+            payload["env"] = self.base_env
+
         return self.send_request(payload)
