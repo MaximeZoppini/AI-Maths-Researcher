@@ -78,16 +78,81 @@ python3 -m agent.researcher --deploy -m "feat: add new formal proof"
 ```
 > **Note :** Un timer systemd (`lean-sync.timer`) tourne également en tâche de fond sur le conteneur pour synchroniser automatiquement les commits GitHub toutes les 60 secondes.
 
+### 4. Benchmark MiniF2F & Analyse Pré-Vol (Pre-Flight)
+Vérification des 244 théorèmes officiels avec estimation du coût API et contrôle de solvabilité :
+```bash
+# Simulation sans appel API ni coût (vérification budget & tokens)
+python3 -B -m benchmarks.minif2f --limit 244 --skip-solved --dry-run
+
+# Lancement complet (requiert solde API suffisant)
+python3 -B -m benchmarks.minif2f --limit 244 --attempts 3 --pass-k 2 --skip-solved
+```
+
+### 5. Préparation de Soumission Mathlib (Kit Sans Action Réseau)
+Génère le dossier `submissions/<cible>/` avec code conforme, corps de PR, checklist et script de commandes manuelles :
+```bash
+python3 -B scripts/submission_kit.py --target mathd_algebra_137
+```
+
+### 6. Analyse des Manques Mathlib & Lemmes Hallucinés
+Analyse les erreurs compilateur de `data/attempts.db` et interroge Loogle pour identifier les lemmes manquants :
+```bash
+python3 -B scripts/mathlib_gaps.py
+```
+
+### 7. Daemon de Veille & Priorisation des Cibles
+Surveillance périodique, détection d'issues GitHub (watchlist) et priorisation stricte des cibles `verified: true` :
+```bash
+# Un seul cycle d'inspection
+python3 -B scripts/daemon.py --run-once
+
+# Classement des cibles vérifiées par ratio rentabilité / faisabilité
+python3 -B scripts/rank_targets.py
+```
+
+### 8. Génération du Rapport Officiel de Certification
+Agrège les preuves certifiées 'axiom-clean' et statistiques dans `BOUNTY_REPORT.md` :
+```bash
+python3 -B scripts/bounty_report.py
+```
+
 ---
 
 ## 📁 Arborescence du Projet
-- `problems/` : Fichiers `.lean` pour chaque problème résolu ou conjecture ouverte.
+- `problems/` : Fichiers `.lean` pour chaque problème résolu ou conjecture ouverte (certifiés en prod).
 - `notes/` : Énoncés en langage naturel, pistes de recherche, sources et bounties.
+- `benchmarks/` :
+  - `minif2f.py` : Moteur de benchmark MiniF2F (244 théorèmes) avec pré-vol budgétaire.
+  - `minif2f_test.lean` : Cache officiel des 244 théorèmes MiniF2F test.
 - `agent/` :
   - `verifier.py` : Connecteur SSH direct avec l'infrastructure Lean 4 / Mathlib.
-  - `researcher.py` : Interface CLI de recherche, validation et déploiement.
+  - `deepseek_prover.py` : Moteur de formalisation itératif avec feedback compilateur.
+  - `planner.py` : `BlueprintPlanner` décomposant un énoncé en lemmes intermédiaires.
+  - `retrieval.py` & `loogle.py` : Recherche de lemmes Mathlib via l'API Loogle.
+  - `targets.py` : Gestion des cibles, du registre et de la file avec garde-fous `verified`.
+  - `watcher.py` : Veille API GitHub sur liste blanche pour repérer les nouveaux besoins.
+  - `researcher.py` : Interface CLI d'audit et de déploiement.
 - `scripts/` :
-  - `check.sh` : Script de build et d'audit d'axiomes.
+  - `daemon.py` : Daemon autonome de veille et de cycle de preuve.
+  - `submission_kit.py` : Générateur de kit de PR (zéro commande réseau auto).
+  - `mathlib_gaps.py` : Mineur de lemmes manquants depuis la base des tentatives.
+  - `rank_targets.py` : Algorithme de ranking des cibles vérifiées.
+  - `bounty_report.py` : Générateur de rapport de certification `BOUNTY_REPORT.md`.
   - `deploy_prod.sh` : Script de déploiement synchrone PC -> GitHub -> Prod Proxmox.
-  - `auto_pull_and_check.sh` : Script exécuté par le timer systemd en prod.
+  - `check.sh` / `auto_pull_and_check.sh` : Scripts d'audit formel sur le conteneur LXC.
+- `targets/` :
+  - `registry.yaml` & `queue.yaml` : Registres des cibles (toute entrée externe `verified: false` par défaut).
+  - `watchlist.yaml` : Dépôts surveillés par le watcher.
+  - `repo_profiles/` : Profils de conventions et gabarits de PR (`mathlib4.yaml`).
+- `reports/` : Rapports générés (manques Mathlib, audits).
+- `submissions/` : Kits de soumission prêts pour relecture humaine.
 - `SunFormal/` : Package racine Lean 4.
+
+---
+
+## 🛡️ Garde-Fous & Principes Opérationnels
+
+1. **Intégrité Absolue des Données** : Aucun montant, URL ou énoncé inventé. Toute cible externe créée automatiquement porte la mention `verified: false` et est ignorée par le daemon tant qu'un humain ne l'a pas validée.
+2. **Certification Zéro-Sorry Formelle** : Chaque preuve acceptée subit une vérification stricte `#print axioms` en environnement conteneurisé LXC Proxmox isolé.
+3. **Zéro Action Réseau Non Supervisée** : Le kit de soumission génère les branches et templates de PR en local, mais n'exécute aucun appel `git push` ou `gh pr create` sans action explicite de l'opérateur.
+
