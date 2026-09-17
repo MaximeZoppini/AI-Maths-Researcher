@@ -30,8 +30,8 @@ def safe_write_text(path: Path, content: str):
         path.write_text(content, encoding="utf-8")
     except PermissionError:
         import subprocess
-        # Only uses shell cat for local filesystem permission handling under macOS TCC
-        subprocess.run(["sh", "-c", f"cat > '{path}'"], input=content, text=True, check=True)
+        # Uses tee for local filesystem permission handling under macOS TCC
+        subprocess.run(["tee", str(path)], input=content, text=True, stdout=subprocess.DEVNULL, check=True)
 
 def find_problem_file(target_name: str) -> Optional[Path]:
     """Finds the source Lean file corresponding to target_name in problems/."""
@@ -108,10 +108,17 @@ def generate_submission(
     raw_code = source_file.read_text(encoding="utf-8")
     cleaned_code = clean_lean_code(raw_code, target_name, docstring=docstring)
 
-    # 1. Output directory
+    # 1. Output directory & naming
     clean_target_name = source_file.stem.replace("minif2f_", "")
     out_dir = SUBMISSIONS_DIR / clean_target_name
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check style rules (max_columns)
+    style_rules = profile.get("style_rules", {})
+    max_columns = style_rules.get("max_columns", 100)
+    long_lines = [(i + 1, len(line)) for i, line in enumerate(cleaned_code.splitlines()) if len(line) > max_columns]
+    if long_lines:
+        print(f"  ⚠️ [Style] {len(long_lines)} ligne(s) dépassent la limite de {max_columns} colonnes dans {clean_target_name}.lean (ex. Ligne {long_lines[0][0]}: {long_lines[0][1]} cols)")
 
     # 2. Cleaned Lean file
     clean_file_path = out_dir / f"{clean_target_name}.lean"
@@ -133,6 +140,8 @@ def generate_submission(
 
     # 4. Human checklist
     checklist = profile.get("checklist", "# Checklist de relecture\n- [ ] Relire avant soumission\n")
+    if long_lines:
+        checklist += f"\n> [!WARNING]\n> **Alerte Linter Colonnes** : {len(long_lines)} ligne(s) dépassent {max_columns} colonnes (ex: Ligne {long_lines[0][0]} : {long_lines[0][1]} cols). Reformatez ces lignes avant soumission.\n"
     checklist_path = out_dir / "CHECKLIST.md"
     safe_write_text(checklist_path, checklist.strip() + "\n")
     print(f"  ✅ [3/4] Checklist de revue humaine générée : {checklist_path}")
@@ -148,23 +157,36 @@ TARGET="{clean_target_name}"
 REPO="{repo}"
 BRANCH="feat/${{TARGET}}"
 
-echo "🚀 Préparation de la branche pour ${{TARGET}}..."
-# 1. Fork et clonage (si pas déjà fait)
-# gh repo fork "${{REPO}}" --clone=false || true
+echo "🚀 Guide de soumission manuelle pour ${{TARGET}}..."
 
-# 2. Création de la branche locale
-git checkout -b "${{BRANCH}}"
+# ÉTAPE 1 : Fork et clone de Mathlib (si pas déjà fait)
+# gh repo fork "${{REPO}}" --clone
+# cd mathlib4
 
-# 3. Copie du fichier nettoyé
-cp "{clean_file_path.name}" Mathlib/
+# ÉTAPE 2 : Branche de travail
+# git checkout master
+# git pull upstream master
+# git checkout -b "${{BRANCH}}"
 
-# 4. Commit et push
-git add "Mathlib/{clean_file_path.name}"
-git commit -m "feat(Mathlib): add ${{TARGET}}"
-git push -u origin "${{BRANCH}}"
+# ÉTAPE 3 : Choix du sous-module thématique Mathlib (ATTENTION : pas de dépôt direct à la racine !)
+# Identifiez le dossier adéquat selon la nature du théorème :
+# - Théorème général réutilisable : Mathlib/Algebra/... ou Mathlib/NumberTheory/...
+# - Problème d'olympiade brut : Archive/Imo/... ou Archive/... (pas dans le core !)
+DEST_DIR="Mathlib/Path/To/Submodule" # <-- À REMPLACER PAR LE CHEMIN EXACT
+# mkdir -p "${{DEST_DIR}}"
+# cp "{clean_file_path.resolve()}" "${{DEST_DIR}}/{clean_file_path.name}"
 
-# 5. Création de la Pull Request
-gh pr create --repo "${{REPO}}" --title "feat(Mathlib): add ${{TARGET}}" --body-file "PR_BODY.md"
+# ÉTAPE 4 : Compilation locale obligatoire (validation Lake & Linters)
+# lake exe cache get
+# lake build
+
+# ÉTAPE 5 : Commit et Push
+# git add "${{DEST_DIR}}/{clean_file_path.name}"
+# git commit -m "feat(Mathlib): formalize ${{TARGET}}"
+# git push -u origin "${{BRANCH}}"
+
+# ÉTAPE 6 : Création de la Pull Request via gh CLI
+# gh pr create --repo "${{REPO}}" --title "feat(Mathlib): formalize ${{TARGET}}" --body-file "{pr_body_path.resolve()}"
 """
     commands_path = out_dir / "commands.sh"
     safe_write_text(commands_path, commands_sh.strip() + "\n")

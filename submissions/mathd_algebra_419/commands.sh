@@ -7,20 +7,33 @@ TARGET="mathd_algebra_419"
 REPO="leanprover-community/mathlib4"
 BRANCH="feat/${TARGET}"
 
-echo "🚀 Préparation de la branche pour ${TARGET}..."
-# 1. Fork et clonage (si pas déjà fait)
-# gh repo fork "${REPO}" --clone=false || true
+echo "🚀 Guide de soumission manuelle pour ${TARGET}..."
 
-# 2. Création de la branche locale
-git checkout -b "${BRANCH}"
+# ÉTAPE 1 : Fork et clone de Mathlib (si pas déjà fait)
+# gh repo fork "${REPO}" --clone
+# cd mathlib4
 
-# 3. Copie du fichier nettoyé
-cp "mathd_algebra_419.lean" Mathlib/
+# ÉTAPE 2 : Branche de travail
+# git checkout master
+# git pull upstream master
+# git checkout -b "${BRANCH}"
 
-# 4. Commit et push
-git add "Mathlib/mathd_algebra_419.lean"
-git commit -m "feat(Mathlib): add ${TARGET}"
-git push -u origin "${BRANCH}"
+# ÉTAPE 3 : Choix du sous-module thématique Mathlib (ATTENTION : pas de dépôt direct à la racine !)
+# Identifiez le dossier adéquat selon la nature du théorème :
+# - Théorème général réutilisable : Mathlib/Algebra/... ou Mathlib/NumberTheory/...
+# - Problème d'olympiade brut : Archive/Imo/... ou Archive/... (pas dans le core !)
+DEST_DIR="Mathlib/Path/To/Submodule" # <-- À REMPLACER PAR LE CHEMIN EXACT
+# mkdir -p "${DEST_DIR}"
+# cp "/Users/maxime/Documents/antigravity/optimistic-curie/AI-Maths-Researcher/submissions/mathd_algebra_419/mathd_algebra_419.lean" "${DEST_DIR}/mathd_algebra_419.lean"
 
-# 5. Création de la Pull Request
-gh pr create --repo "${REPO}" --title "feat(Mathlib): add ${TARGET}" --body-file "PR_BODY.md"
+# ÉTAPE 4 : Compilation locale obligatoire (validation Lake & Linters)
+# lake exe cache get
+# lake build
+
+# ÉTAPE 5 : Commit et Push
+# git add "${DEST_DIR}/mathd_algebra_419.lean"
+# git commit -m "feat(Mathlib): formalize ${TARGET}"
+# git push -u origin "${BRANCH}"
+
+# ÉTAPE 6 : Création de la Pull Request via gh CLI
+# gh pr create --repo "${REPO}" --title "feat(Mathlib): formalize ${TARGET}" --body-file "/Users/maxime/Documents/antigravity/optimistic-curie/AI-Maths-Researcher/submissions/mathd_algebra_419/PR_BODY.md"

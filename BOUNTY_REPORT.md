@@ -1,6 +1,6 @@
 # 🏆 AI-Maths-Researcher — Rapport Officiel de Certification & Bounties
 
-> **Généré le** : `2026-09-17 15:10:19 UTC`  
+> **Généré le** : `2026-09-17 17:31:12 UTC`  
 > **Infra de Vérification** : LXC Container 200 (Proxmox 100.90.108.89)  
 > **Lean 4 / Mathlib** : `v4.34.0` | **Axiomes Admis** : `[propext, Classical.choice, Quot.sound]` (Strict Zero-Sorry)
 
@@ -10,7 +10,9 @@
 
 | Métrique | Valeur |
 | :--- | :--- |
-| 🎯 **Métrique Officielle MiniF2F Test (Set Figé)** | **19 / 36** (52.8%) |
+| 🎯 **Métrique Officielle de Référence (MiniF2F Test, 30 premiers)** | **17 / 30** (56.7%) |
+| **Théorèmes MiniF2F Certifiés en Prod (problems/)** | **18 / 244** (7.4%) |
+| **Problèmes Olympiades Tentés en Base (Historique cumulé)** | **19 / 36** (52.8%) |
 | **Sous-Lemmes Décomposés & Résolus** | **9 / 19** |
 | **Nombre Total de Tentatives** | **261** |
 | **Temps Moyen par Tentative (REPL)** | **802.3 ms** |

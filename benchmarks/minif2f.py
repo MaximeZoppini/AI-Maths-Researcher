@@ -45,7 +45,7 @@ def safe_write_file(path: Path, content: str):
         path.write_text(content, encoding="utf-8")
     except PermissionError:
         import subprocess
-        subprocess.run(["sh", "-c", f"cat > '{path}'"], input=content, text=True, check=True)
+        subprocess.run(["tee", str(path)], input=content, text=True, stdout=subprocess.DEVNULL, check=True)
 
 def run_benchmark(
     limit: int = 50,
@@ -57,49 +57,60 @@ def run_benchmark(
     skip_solved: bool = False,
     workers: int = 1,
     min_balance: float = 0.50,
-    dry_run: bool = False
+    dry_run: bool = False,
+    timeout_sec: int = 45
 ):
-    # 0. Récupération du solde API
+    source_file = Path("benchmarks") / "minif2f_test.lean"
+    if not source_file.exists():
+        print(f"❌ Fichier de benchmark introuvable : {source_file}")
+        return
+
+    theorems = parse_theorems(source_file.read_text(encoding="utf-8"))
     bal = get_deepseek_balance()
 
-    content = fetch_minif2f_test()
-    theorems = parse_theorems(content)
-    
     if name_filter:
         selected = [t for t in theorems if t[0] == name_filter]
         if not selected:
             print(f"⚠️ Problème '{name_filter}' introuvable dans MiniF2F.")
             return
+        target_set = selected
     else:
-        selected = theorems[:limit]
+        target_set = theorems[:limit]
+
+    target_set_size = len(target_set)
 
     # Filtrer les problèmes déjà résolus si demandé
+    already_solved = []
     if skip_solved:
-        filtered = []
-        for name, decl in selected:
-            out_file = Path("problems") / f"minif2f_{name}.lean"
-            if out_file.exists():
-                filtered.append((name, decl))
-        # Log des déjà résolus
-        already_solved = [t[0] for t in selected if (Path("problems") / f"minif2f_{t[0]}.lean").exists()]
-        selected = [t for t in selected if t[0] not in already_solved]
+        already_solved = [t[0] for t in target_set if (Path("problems") / f"minif2f_{t[0]}.lean").exists()]
+        selected = [t for t in target_set if t[0] not in already_solved]
         if already_solved:
             print(f"⏩ [Skip] {len(already_solved)} problème(s) déjà résolu(s) et certifié(s) dans problems/.")
+    else:
+        selected = list(target_set)
 
     total_problems = len(selected)
+    already_solved_count = len(already_solved)
 
-    # Calcul économique pré-campagne
+    # Calcul économique pré-campagne réaliste
     db = AttemptsDB()
     with db.conn:
-        row = db.conn.execute("""
-            SELECT COALESCE(SUM(cost_usd), 0.0), COUNT(DISTINCT problem_name)
-            FROM attempts
+        # Coût total réel engagé (y compris les sous-lemmes Blueprint)
+        row_cost = db.conn.execute("SELECT COALESCE(SUM(cost_usd), 0.0) FROM attempts").fetchone()
+        tot_cost_all = row_cost[0] if row_cost else 0.0
+
+        # Nombre de problèmes racines distincts tentés
+        row_probs = db.conn.execute("""
+            SELECT COUNT(DISTINCT problem_name) FROM attempts
             WHERE problem_name NOT LIKE '%_step%'
         """).fetchone()
-        tot_cost_db, tot_probs_db = row[0], row[1]
-        avg_cost = (tot_cost_db / tot_probs_db) if tot_probs_db > 0 else 0.035
+        tot_probs_db = row_probs[0] if row_probs else 0
+        measured_avg_cost = (tot_cost_all / tot_probs_db) if tot_probs_db > 0 else 0.025
 
-    estimated_cost = total_problems * avg_cost
+    # Pour les problèmes restants du set (plus denses en AMC12/AIME/IMO exigeant escalade reasoner),
+    # appliquer un plancher réaliste conservateur de $0.035 / problème
+    conservative_unit_cost = max(measured_avg_cost, 0.035)
+    estimated_cost = total_problems * conservative_unit_cost
     required_balance = estimated_cost + min_balance
     bal_float = bal if bal is not None else 0.0
     can_run = (bal is not None and bal_float >= required_balance)
@@ -107,9 +118,11 @@ def run_benchmark(
     print("\n" + "=" * 65)
     print("📊 ANALYSE PRÉALABLE DU BUDGET & DES RESSOURCES (PRE-FLIGHT)")
     print("=" * 65)
-    print(f"Problèmes au total dans le set test : {len(theorems)}")
+    print(f"Ensemble cible de référence       : {target_set_size} problèmes")
+    print(f"Problèmes déjà résolus certifiés   : {already_solved_count}")
     print(f"Problèmes restant à évaluer        : {total_problems}")
-    print(f"Coût moyen par problème mesuré en base : ${avg_cost:.4f} USD")
+    print(f"Coût unitaire moyen en base        : ${measured_avg_cost:.4f} USD (toutes étapes incluses)")
+    print(f"Coût unitaire appliqué             : ${conservative_unit_cost:.4f} USD (avec marge complexité)")
     print(f"Coût estimé pour cette campagne    : ${estimated_cost:.2f} USD")
     print(f"Solde DeepSeek disponible          : ${bal_float:.2f} USD")
     print(f"Seuil de sécurité requis           : ${required_balance:.2f} USD (estimation + ${min_balance:.2f})")
@@ -130,7 +143,7 @@ def run_benchmark(
     print("\n" + "=" * 65)
     print(f"🏁 Démarrage du Benchmark MiniF2F Lean 4 ({total_problems} problèmes)")
     print(f"Modèle : {model} | Essais max : {attempts} | pass@{pass_k} | Workers : {workers}")
-    print(f"Blueprint : {use_blueprint} | Escalade Reasoner : Activée | Seuil Budget : ${min_balance:.2f}")
+    print(f"Timeout : {timeout_sec}s | Blueprint : {use_blueprint} | Escalade Reasoner : Activée")
     print("=" * 65)
 
     if total_problems == 0:
@@ -142,7 +155,7 @@ def run_benchmark(
         model=model,
         pass_k=pass_k,
         enable_escalation=True,
-        timeout_per_attempt_sec=25,
+        timeout_per_attempt_sec=timeout_sec,
         min_balance_threshold_usd=min_balance,
         early_abort=True
     )
@@ -221,11 +234,17 @@ def run_benchmark(
         if repl_pool:
             repl_pool.close()
 
-    rate_pct = (solved_count / max(1, total_problems)) * 100
+    cumulative_solved = already_solved_count + solved_count
+    cumulative_rate_pct = (cumulative_solved / max(1, target_set_size)) * 100
+    session_rate_pct = (solved_count / max(1, total_problems) * 100) if total_problems > 0 else 0.0
+
     print("\n" + "=" * 65)
-    print("🏆 RÉSULTAT DE LA CAMPAGNE MINIF2F")
-    print(f"🎯 Métrique Officielle MiniF2F Test : {solved_count} / {total_problems} ({rate_pct:.1f}%)")
-    print(f"   (Évaluation sur set figé de problèmes distincts)")
+    print("🏆 RÉSULTAT DU BENCHMARK MINIF2F")
+    print(f"🎯 Métrique Officielle MiniF2F Test : {cumulative_solved} / {target_set_size} ({cumulative_rate_pct:.1f}%)")
+    print(f"   (Ensemble de référence figé : {target_set_size} problèmes distincts)")
+    if already_solved_count > 0:
+        print(f"   - Déjà résolus certifiés avant le run : {already_solved_count}")
+        print(f"   - Nouveaux résolus dans cette session : {solved_count} / {total_problems} ({session_rate_pct:.1f}%)")
     print("=" * 65)
 
     # Figer le rapport de la campagne dans reports/
@@ -237,15 +256,17 @@ def run_benchmark(
         f"# Rapport Officiel de Campagne MiniF2F — {timestamp}",
         "",
         f"- **Date** : `{timestamp}` UTC",
-        f"- **Métrique Officielle** : **{solved_count} / {total_problems} ({rate_pct:.1f}%)**",
+        f"- **🎯 Métrique Officielle MiniF2F Test** : **{cumulative_solved} / {target_set_size} ({cumulative_rate_pct:.1f}%)**",
+        f"- **Ensemble de référence ciblé** : {target_set_size} problèmes distincts",
+        f"- **Déjà résolus certifiés (pré-campagne)** : {already_solved_count}",
+        f"- **Nouveaux résolus dans cette session** : {solved_count} / {total_problems} ({session_rate_pct:.1f}%)",
         f"- **Modèle de base** : `{model}` (avec escalade reasoner)",
         f"- **Workers parallèles** : `{workers}`",
         f"- **pass@k** : `{pass_k}`",
+        f"- **Timeout REPL** : `{timeout_sec}s`",
         f"- **Mode Blueprint** : `{use_blueprint}`",
-        f"- **Problèmes évalués** : {total_problems}",
-        f"- **Résolus certifiés** : {solved_count}",
         "",
-        "## Problèmes Résolus",
+        "## Nouveaux Problèmes Résolus",
         ""
     ]
     for s in newly_solved:
@@ -274,6 +295,7 @@ def main():
     parser.add_argument("--pass-k", type=int, default=1, help="Nombre de générations parallèles (default: 1)")
     parser.add_argument("--skip-solved", action="store_true", help="Ignorer les problèmes déjà résolus")
     parser.add_argument("--workers", type=int, default=1, help="Nombre de workers parallèles (default: 1)")
+    parser.add_argument("--timeout", type=int, default=45, help="Timeout REPL par essai en secondes (default: 45s)")
     parser.add_argument("--min-balance", type=float, default=0.50, help="Solde minimal DeepSeek USD requis (default: 0.50)")
     parser.add_argument("--dry-run", action="store_true", help="Vérifier les problèmes, estimer les coûts et le solde sans appel LLM")
     args = parser.parse_args()
@@ -287,6 +309,7 @@ def main():
         pass_k=args.pass_k,
         skip_solved=args.skip_solved,
         workers=args.workers,
+        timeout_sec=args.timeout,
         min_balance=args.min_balance,
         dry_run=args.dry_run
     )
