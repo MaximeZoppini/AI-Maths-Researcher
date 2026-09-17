@@ -37,6 +37,16 @@ class Autoformalizer:
     def __init__(self, config: Optional[ProverConfig] = None):
         self.config = config or ProverConfig()
         self.llm = LLMProvider(model=self.config.model)
+        # Juge indépendant : différent du formaliseur pour éliminer le biais d'auto-validation
+        if self.llm.gemini_key:
+            self.judge_llm = LLMProvider(model="gemini-2.5-flash")
+            self.judge_name = "gemini-2.5-flash"
+        elif self.llm.deepseek_key:
+            self.judge_llm = LLMProvider(model="deepseek-reasoner")
+            self.judge_name = "deepseek-reasoner"
+        else:
+            self.judge_llm = self.llm
+            self.judge_name = self.config.model
         self.retriever = PremiseRetriever()
 
     def _get_standard_header(self) -> str:
@@ -74,8 +84,8 @@ class Autoformalizer:
         return False, "\n".join(resp.error_texts)
 
     def check_round_trip(self, original_text: str, lean_stmt: str) -> Tuple[bool, str, float, str]:
-        """Guardrail 2: Neutral back-translation and semantic equivalence check."""
-        # Step 1: Back-translate in a blank context
+        """Guardrail 2: Neutral back-translation and semantic equivalence check with independent judge."""
+        # Step 1: Back-translate in a blank context with translation model
         back_prompt = (
             "You are a rigorous mathematical translator. Translate the following Lean 4 theorem statement into natural language.\n"
             "State all types, all hypotheses/assumptions, and the exact conclusion clearly and precisely.\n\n"
@@ -85,7 +95,8 @@ class Autoformalizer:
         back_translation, _, _, _ = self.llm.generate(back_prompt, lean_stmt, iteration=1, temperature=0.1)
         back_translation = back_translation.replace("```", "").strip()
 
-        # Step 2: LLM Judge comparing original problem and back-translation
+        # Step 2: Independent LLM Judge comparing original problem and back-translation
+        print(f"  ⚖️  Évaluation d'équivalence sémantique par le juge indépendant ({self.judge_name})...")
         judge_prompt = f"""You are an expert mathematical judge evaluating formalization fidelity.
 Compare the ORIGINAL mathematical problem with the RECONSTRUCTED statement translated from formal Lean 4 code.
 
@@ -107,7 +118,7 @@ Respond ONLY with valid JSON in this exact structure:
   "reason": "Detailed explanation of mathematical equivalence"
 }}
 """
-        judge_raw, _, _, _ = self.llm.generate(judge_prompt, lean_stmt, iteration=1, temperature=0.1)
+        judge_raw, _, _, _ = self.judge_llm.generate(judge_prompt, lean_stmt, iteration=1, temperature=0.1)
         
         # Parse JSON
         try:

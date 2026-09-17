@@ -7,11 +7,11 @@ import sqlite3
 import datetime
 from pathlib import Path
 
-DB_PATH = "/tmp/ai_maths_data/attempts.db"
+DB_PATH = Path("data/attempts.db")
 OUTPUT_FILE = Path(__file__).resolve().parent.parent / "BOUNTY_REPORT.md"
 
 def generate_report():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
 
     # Total stats
@@ -22,13 +22,22 @@ def generate_report():
     avg_duration = avg_duration or 0.0
     total_cost = total_cost or 0.0
 
-    # Solved unique problems
-    cur.execute("SELECT DISTINCT problem_name FROM attempts WHERE success = 1")
-    solved_problems = [r[0] for r in cur.fetchall()]
-
-    # Total distinct problems
-    cur.execute("SELECT COUNT(DISTINCT problem_name) FROM attempts")
-    total_problems = cur.fetchone()[0] or 0
+    # Distinguer problèmes de base et sous-lemmes
+    cur.execute("SELECT problem_name, success FROM attempts")
+    all_rows = cur.fetchall()
+    base_problems = set()
+    solved_base = set()
+    sub_lemmas = set()
+    solved_sub_lemmas = set()
+    for name, succ in all_rows:
+        if "_step" in name:
+            sub_lemmas.add(name)
+            if succ == 1:
+                solved_sub_lemmas.add(name)
+        else:
+            base_problems.add(name)
+            if succ == 1:
+                solved_base.add(name)
 
     # Per-model stats
     cur.execute("""
@@ -38,14 +47,26 @@ def generate_report():
     """)
     model_stats = cur.fetchall()
 
-    # Solved theorems details
+    # Solved theorems details - Dédupliqués (garder la meilleure preuve par problème)
     cur.execute("""
         SELECT problem_name, iteration, model, duration_ms, cost_usd, candidate_code, timestamp
         FROM attempts
         WHERE success = 1
         ORDER BY id ASC
     """)
-    solved_details = cur.fetchall()
+    raw_solved = cur.fetchall()
+    best_proofs = {}
+    for row in raw_solved:
+        p_name, iters, model, dur, cost, code, ts = row
+        if p_name not in best_proofs:
+            best_proofs[p_name] = row
+        else:
+            prev = best_proofs[p_name]
+            # Prioriser moins d'itérations, puis coût min
+            if iters < prev[1] or (iters == prev[1] and cost < prev[4]):
+                best_proofs[p_name] = row
+
+    solved_details = sorted(best_proofs.values(), key=lambda r: r[0])
 
     now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
@@ -62,7 +83,8 @@ def generate_report():
         "",
         "| Métrique | Valeur |",
         "| :--- | :--- |",
-        f"| **Problèmes Résolus & Certifiés** | **{len(solved_problems)} / {total_problems}** ({len(solved_problems)/max(1, total_problems)*100:.1f}%) |",
+        f"| **Problèmes Uniques Résolus** | **{len(solved_base)} / {len(base_problems)}** ({len(solved_base)/max(1, len(base_problems))*100:.1f}%) |",
+        f"| **Sous-Lemmes Décomposés & Résolus** | **{len(solved_sub_lemmas)} / {len(sub_lemmas)}** |",
         f"| **Nombre Total de Tentatives** | **{total_attempts}** |",
         f"| **Temps Moyen par Tentative (REPL)** | **{avg_duration:.1f} ms** |",
         f"| **Coût Total Consommé (API LLM)** | **${total_cost:.4f}** |",

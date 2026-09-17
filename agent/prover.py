@@ -37,7 +37,9 @@ class ProverConfig:
     model: str = "deepseek-chat"
     temperature: float = 0.2
     dynamic_temperature: bool = True
-    timeout_per_attempt_sec: int = 15
+    timeout_per_attempt_sec: int = 25
+    pass_k: int = 1
+    enable_escalation: bool = True
 
 class LLMProvider:
     """Dispatches requests to DeepSeek, Gemini, or OpenAI based on available keys."""
@@ -58,46 +60,67 @@ class LLMProvider:
         else:
             self.model = "fallback-tactic-search"
 
-    def generate(self, prompt: str, theorem_decl: str, iteration: int = 1, temperature: float = 0.2) -> Tuple[str, int, int, float]:
+    def generate(
+        self,
+        prompt: str,
+        theorem_decl: str,
+        iteration: int = 1,
+        temperature: float = 0.2,
+        model: Optional[str] = None
+    ) -> Tuple[str, int, int, float]:
         """
         Returns (generated_code, prompt_tokens, completion_tokens, cost_usd).
         """
+        target_model = model or self.model
         if self.deepseek_key:
-            return self._call_deepseek(prompt, temperature)
+            return self._call_deepseek(prompt, temperature, model=target_model)
         elif self.gemini_key:
-            return self._call_gemini(prompt, temperature)
+            return self._call_gemini(prompt, temperature, model=target_model)
         elif self.openai_key:
-            return self._call_openai(prompt, temperature)
+            return self._call_openai(prompt, temperature, model=target_model)
         else:
             return self._fallback_tactic_generator(theorem_decl, iteration)
 
-    def _call_deepseek(self, prompt: str, temperature: float) -> Tuple[str, int, int, float]:
+    def _call_deepseek(self, prompt: str, temperature: float, model: str = "deepseek-chat") -> Tuple[str, int, int, float]:
         url = "https://api.deepseek.com/chat/completions"
-        payload = {
-            "model": "deepseek-chat",
+        is_reasoner = (model == "deepseek-reasoner")
+
+        payload: Dict[str, Any] = {
+            "model": model,
             "messages": [
                 {"role": "system", "content": "You are an elite formal mathematician specialized in Lean 4 and Mathlib. Output only valid Lean 4 code."},
                 {"role": "user", "content": prompt}
             ],
-            "temperature": temperature,
-            "max_tokens": 2048
+            "max_tokens": 8192 if is_reasoner else 2048
         }
+        # DeepSeek reasoner does not accept temperature
+        if not is_reasoner:
+            payload["temperature"] = temperature
+
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.deepseek_key}"}
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        timeout_http = 120 if is_reasoner else 35
+        with urllib.request.urlopen(req, timeout=timeout_http) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            text = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]["message"]
+            text = choice.get("content") or ""
+            reasoning = choice.get("reasoning_content") or ""
+            if reasoning and is_reasoner:
+                print(f"    💭 DeepSeek Reasoner ({len(reasoning)} caractères de CoT)...")
             usage = data.get("usage", {})
             p_tok = usage.get("prompt_tokens", 0)
             c_tok = usage.get("completion_tokens", 0)
-            cost = (p_tok * 0.00000014) + (c_tok * 0.00000028)
+            if is_reasoner:
+                cost = (p_tok * 0.00000055) + (c_tok * 0.00000219)
+            else:
+                cost = (p_tok * 0.00000014) + (c_tok * 0.00000028)
             return text, p_tok, c_tok, cost
 
-    def _call_gemini(self, prompt: str, temperature: float) -> Tuple[str, int, int, float]:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.gemini_key}"
+    def _call_gemini(self, prompt: str, temperature: float, model: str = "gemini-2.5-flash") -> Tuple[str, int, int, float]:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.gemini_key}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": temperature, "maxOutputTokens": 2048}
@@ -121,7 +144,7 @@ class LLMProvider:
             cost = (p_tok * 0.0000001) + (c_tok * 0.0000004)
             return text, p_tok, c_tok, cost
 
-    def _call_openai(self, prompt: str, temperature: float) -> Tuple[str, int, int, float]:
+    def _call_openai(self, prompt: str, temperature: float, model: str = "gpt-4o-mini") -> Tuple[str, int, int, float]:
         url = "https://api.openai.com/v1/chat/completions"
         payload = {
             "model": "gpt-4o-mini",
@@ -246,17 +269,43 @@ class ProofSearchEngine:
 
         premises = self.retriever.retrieve_for_statement(theorem_decl)
         if premises:
-            print(f"  → {len(premises)} lemmes Mathlib pertinents récupérés via Loogle.")
+            print(f"  → {len(premises)} lemmes Mathlib pertinents récupérés (LeanSearch + Loogle).")
 
         history: List[Dict[str, Any]] = []
         total_cost = 0.0
 
         def _run_loop(repl: LeanREPL) -> Tuple[bool, str]:
             nonlocal total_cost
+            seen_premise_names = {p.name for p in premises}
+
             for iteration in range(1, self.config.max_attempts + 1):
                 if total_cost >= self.config.budget_usd:
                     print(f"⚠️ Budget limite de ${self.config.budget_usd:.2f} atteint. Arrêt.")
                     break
+
+                # 1. Escalade dynamique de modèle : tentatives 1-2 chat, tentatives 3+ reasoner
+                if self.config.enable_escalation and iteration >= 3 and self.llm.deepseek_key:
+                    active_model = "deepseek-reasoner"
+                else:
+                    active_model = self.config.model
+
+                # 2. Retrieval dynamique sur but REPL et identifiants inconnus
+                if history:
+                    last_h = history[-1]
+                    err = last_h.get("errors", "")
+                    goals = last_h.get("goals", "")
+                    if goals:
+                        for gp in self.retriever.query_for_goal(goals, limit=3):
+                            if gp.name not in seen_premise_names:
+                                seen_premise_names.add(gp.name)
+                                premises.append(gp)
+                    if "unknown identifier" in err or "unknown constant" in err:
+                        m = re.search(r"unknown (?:identifier|constant) [`']([a-zA-Z0-9_.']+)['`]", err)
+                        if m:
+                            for ip in self.retriever.query_for_unknown_identifier(m.group(1), limit=3):
+                                if ip.name not in seen_premise_names:
+                                    seen_premise_names.add(ip.name)
+                                    premises.append(ip)
 
                 current_temp = (
                     min(0.8, 0.1 + (iteration - 1) * 0.15)
@@ -265,83 +314,122 @@ class ProofSearchEngine:
                 )
 
                 prompt = self.build_prompt(theorem_decl, premises, history, context_code=context_code)
-                print(f"\n[Tentative {iteration}/{self.config.max_attempts}] Génération de preuve ({self.llm.model}, temp={current_temp:.2f})...")
+                print(f"\n[Tentative {iteration}/{self.config.max_attempts}] Génération ({active_model}, temp={current_temp:.2f})...")
 
-                raw_llm, p_tok, c_tok, cost = self.llm.generate(
-                    prompt,
-                    theorem_decl=theorem_decl,
-                    iteration=iteration,
-                    temperature=current_temp
-                )
-                total_cost += cost
+                # 3. Tir parallèle pass@k si configuré sur la 1ère tentative
+                candidates_to_test = []
+                if self.config.pass_k > 1 and iteration == 1:
+                    print(f"  🚀 Tir parallèle pass@{self.config.pass_k} à températures variées...")
+                    temps = [0.1, 0.4, 0.7][:self.config.pass_k]
+                    while len(temps) < self.config.pass_k:
+                        temps.append(0.5)
 
-                candidate_code = self.sanitize_code(raw_llm, theorem_decl)
-                if context_code:
-                    clean_candidate = "\n".join(
-                        l for l in candidate_code.splitlines()
-                        if not l.strip().startswith("import ")
-                        and not l.strip().startswith("set_option ")
-                        and not l.strip().startswith("open scoped ")
-                    ).strip()
-                    full_test_code = context_code.strip() + "\n\n" + clean_candidate
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=self.config.pass_k) as executor:
+                        futures = [
+                            executor.submit(
+                                self.llm.generate,
+                                prompt,
+                                theorem_decl,
+                                iteration=iteration,
+                                temperature=t,
+                                model=active_model
+                            )
+                            for t in temps
+                        ]
+                        for f in futures:
+                            raw_llm, p_tok, c_tok, cost = f.result()
+                            total_cost += cost
+                            candidates_to_test.append((raw_llm, p_tok, c_tok, cost))
                 else:
-                    full_test_code = candidate_code
-
-                # Level 1 Verification (REPL in ~50ms)
-                print(f"  ⚡ Test rapide via LeanREPL...")
-                repl_resp = repl.check_code(full_test_code)
-
-                if repl_resp.is_success:
-                    print(f"  ✨ REPL validé en {repl_resp.duration_ms:.1f}ms ! Envoi au Juge Final (LXC Prod)...")
-                    
-                    prod_res = self.verifier.verify_file_content(full_test_code, temp_name=f"{problem_name}.lean")
-                    
-                    self.db.record_attempt(
-                        problem_name=problem_name,
+                    raw_llm, p_tok, c_tok, cost = self.llm.generate(
+                        prompt,
+                        theorem_decl=theorem_decl,
                         iteration=iteration,
-                        model=self.llm.model,
-                        prompt=prompt,
-                        candidate_code=full_test_code,
-                        success=prod_res.success,
-                        compiler_errors=prod_res.error_message,
-                        duration_ms=repl_resp.duration_ms,
-                        prompt_tokens=p_tok,
-                        completion_tokens=c_tok,
-                        cost_usd=cost
+                        temperature=current_temp,
+                        model=active_model
                     )
+                    total_cost += cost
+                    candidates_to_test.append((raw_llm, p_tok, c_tok, cost))
 
-                    if prod_res.success:
-                        print(f"  🏆 PREUVE CERTIFIÉE SANS FAUTE en {iteration} itération(s) !")
-                        return True, full_test_code
+                # Évaluation des candidats
+                best_failed_candidate = None
+                min_errors = 999
+
+                for raw_llm, p_tok, c_tok, cost in candidates_to_test:
+                    candidate_code = self.sanitize_code(raw_llm, theorem_decl)
+                    if context_code:
+                        clean_candidate = "\n".join(
+                            l for l in candidate_code.splitlines()
+                            if not l.strip().startswith("import ")
+                            and not l.strip().startswith("set_option ")
+                            and not l.strip().startswith("open scoped ")
+                        ).strip()
+                        full_test_code = context_code.strip() + "\n\n" + clean_candidate
                     else:
-                        print(f"  ⚠️ Rejet Juge Final : {prod_res.error_message}")
-                        history.append({
-                            "code": candidate_code,
-                            "errors": prod_res.error_message,
-                            "goals": ""
-                        })
-                else:
-                    err_text = "\n".join(repl_resp.error_texts)
-                    goal_text = "\n".join(repl_resp.goals)
-                    print(f"  ❌ Échec REPL ({repl_resp.duration_ms:.1f}ms) : {err_text[:120]}...")
-                    history.append({
-                        "code": candidate_code,
-                        "errors": err_text,
-                        "goals": goal_text
-                    })
-                    self.db.record_attempt(
-                        problem_name=problem_name,
-                        iteration=iteration,
-                        model=self.llm.model,
-                        prompt=prompt,
-                        candidate_code=full_test_code,
-                        success=False,
-                        compiler_errors=err_text,
-                        duration_ms=repl_resp.duration_ms,
-                        prompt_tokens=p_tok,
-                        completion_tokens=c_tok,
-                        cost_usd=cost
-                    )
+                        full_test_code = candidate_code
+
+                    # Test REPL avec timeout strict
+                    print(f"  ⚡ Évaluation via LeanREPL (timeout={self.config.timeout_per_attempt_sec}s)...")
+                    repl_resp = repl.check_code(full_test_code, timeout_sec=float(self.config.timeout_per_attempt_sec))
+
+                    if repl_resp.is_success:
+                        print(f"  ✨ REPL validé en {repl_resp.duration_ms:.1f}ms ! Envoi au Juge Final (LXC Prod)...")
+                        prod_res = self.verifier.verify_file_content(full_test_code, temp_name=f"{problem_name}.lean")
+
+                        self.db.record_attempt(
+                            problem_name=problem_name,
+                            iteration=iteration,
+                            model=active_model,
+                            prompt=prompt,
+                            candidate_code=full_test_code,
+                            success=prod_res.success,
+                            compiler_errors=prod_res.error_message,
+                            duration_ms=repl_resp.duration_ms,
+                            prompt_tokens=p_tok,
+                            completion_tokens=c_tok,
+                            cost_usd=cost
+                        )
+
+                        if prod_res.success:
+                            print(f"  🏆 PREUVE CERTIFIÉE SANS FAUTE en {iteration} itération(s) !")
+                            return True, full_test_code
+                        else:
+                            print(f"  ⚠️ Rejet Juge Final : {prod_res.error_message}")
+                            history.append({
+                                "code": candidate_code,
+                                "errors": prod_res.error_message,
+                                "goals": ""
+                            })
+                    else:
+                        err_text = "\n".join(repl_resp.error_texts)
+                        goal_text = "\n".join(repl_resp.goals)
+                        print(f"  ❌ Échec REPL ({repl_resp.duration_ms:.1f}ms) : {err_text[:120]}...")
+                        self.db.record_attempt(
+                            problem_name=problem_name,
+                            iteration=iteration,
+                            model=active_model,
+                            prompt=prompt,
+                            candidate_code=full_test_code,
+                            success=False,
+                            compiler_errors=err_text,
+                            unsolved_goals=goal_text,
+                            duration_ms=repl_resp.duration_ms,
+                            prompt_tokens=p_tok,
+                            completion_tokens=c_tok,
+                            cost_usd=cost
+                        )
+                        num_errs = len(repl_resp.error_texts) + len(repl_resp.goals)
+                        if num_errs < min_errors:
+                            min_errors = num_errs
+                            best_failed_candidate = {
+                                "code": candidate_code,
+                                "errors": err_text,
+                                "goals": goal_text
+                            }
+
+                if best_failed_candidate and not repl_resp.is_success:
+                    history.append(best_failed_candidate)
             return False, ""
 
         if external_repl:

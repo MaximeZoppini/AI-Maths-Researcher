@@ -16,8 +16,9 @@ def main():
 
     print(f"Total des tentatives : {stats['total_attempts']}")
     print(f"Tentatives réussies  : {stats['success_count']} ({stats['attempt_success_rate'] * 100:.1f}%)")
-    print(f"Problèmes traités    : {stats['unique_problems']}")
-    print(f"Problèmes résolus    : {stats['solved_problems']} ({stats['problem_solve_rate'] * 100:.1f}%)")
+    print(f"Problèmes uniques    : {stats['base_problems_count']}")
+    print(f"Problèmes résolus    : {stats['solved_base_count']} ({stats['base_solve_rate'] * 100:.1f}%)")
+    print(f"Sous-lemmes explorés : {stats['sub_lemmas_count']} (résolus: {stats['solved_sub_lemmas_count']})")
     print(f"Temps moyen REPL     : {stats['avg_duration_ms']:.1f} ms")
     print(f"Coût total API       : ${stats['total_cost_usd']:.4f}")
 

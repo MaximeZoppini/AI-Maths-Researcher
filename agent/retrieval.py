@@ -43,38 +43,96 @@ class PremiseRetriever:
         except Exception:
             return []
 
+    def query_leansearch(self, query: str, limit: int = 5) -> List[Premise]:
+        """Queries LeanSearch API for semantic Mathlib retrieval."""
+        try:
+            url = "https://leansearch.net/search"
+            payload = {"query": [query], "num_results": limit}
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "AI-Maths-Researcher/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout_sec) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                premises = []
+                if isinstance(data, list) and data and isinstance(data[0], list):
+                    for item in data[0][:limit]:
+                        res = item.get("result", {})
+                        raw_name = res.get("name", [])
+                        name = ".".join(raw_name) if isinstance(raw_name, list) else str(raw_name)
+                        sig = res.get("signature", "") or res.get("type", "")
+                        mod_list = res.get("module_name", [])
+                        mod = ".".join(mod_list) if isinstance(mod_list, list) else str(mod_list)
+                        if name:
+                            premises.append(Premise(name=name, type_sig=sig.replace("\n", " "), module=mod, source="leansearch"))
+                return premises
+        except Exception:
+            return []
+
+    def query_for_goal(self, goal_str: str, limit: int = 5) -> List[Premise]:
+        """Extracts goal target after ⊢ and queries Loogle and LeanSearch."""
+        # Find conclusion target after turnstile ⊢
+        target = ""
+        for line in goal_str.splitlines():
+            if "⊢" in line:
+                target = line.split("⊢", 1)[1].strip()
+                break
+        if not target:
+            return []
+
+        premises = []
+        # 1. Semantic query via LeanSearch on the goal target
+        premises.extend(self.query_leansearch(target, limit=limit))
+
+        # 2. Pattern query on Loogle
+        clean_pattern = re.sub(r"\b[a-zA-Z0-9_']+\b", "_", target)
+        if len(clean_pattern) > 3 and clean_pattern != target:
+            premises.extend(self.query_loogle(clean_pattern, limit=3))
+
+        return premises[:limit]
+
+    def query_for_unknown_identifier(self, identifier: str, limit: int = 5) -> List[Premise]:
+        """Finds candidate Mathlib lemmas when a model hallucinates an identifier."""
+        clean_id = identifier.split(".")[-1]
+        results = self.query_leansearch(clean_id, limit=limit)
+        if not results:
+            results = self.query_loogle(clean_id, limit=limit)
+        return results
+
     def retrieve_for_statement(self, statement: str, max_results: int = 15) -> List[Premise]:
         """
-        Extracts key patterns/keywords from theorem statement and queries retrieval APIs.
+        Combines LeanSearch semantic search with Loogle type-based search.
         """
         results: List[Premise] = []
         seen_names: Set[str] = set()
 
-        # 1. Identify expressions like (a ^ 2), (Even _), (0 ≤ _), etc.
+        # 1. LeanSearch semantic retrieval with clean statement text
+        clean_stmt = re.sub(r"/--.*?--/", "", statement, flags=re.DOTALL)
+        clean_stmt = re.sub(r":=\s*by.*$", "", clean_stmt, flags=re.DOTALL).strip()
+        leansearch_hits = self.query_leansearch(clean_stmt, limit=6)
+        for h in leansearch_hits:
+            if h.name not in seen_names:
+                seen_names.add(h.name)
+                results.append(h)
+
+        # 2. Loogle queries for specific mathematical expressions
         queries = []
-        
-        # Clean theorem signature
-        cleaned = re.sub(r"/--.*?--/", "", statement, flags=re.DOTALL)
-        
-        # Search for equality/inequality forms
-        if "≤" in cleaned or "<" in cleaned:
+        if "≤" in clean_stmt or "<" in clean_stmt:
             queries.append("0 ≤ _ ^ 2")
             queries.append("_ ≤ _ ^ 2 + _ ^ 2")
-        if "Even" in cleaned or "Odd" in cleaned:
+        if "Even" in clean_stmt or "Odd" in clean_stmt:
             queries.append("Even (_ ^ 2)")
             queries.append("Even (_ + _)")
-        if "%" in cleaned or "mod" in cleaned:
+        if "%" in clean_stmt or "mod" in clean_stmt:
             queries.append("(_ + _) % _")
             queries.append("(_ ^ 2) % _")
-
-        # Fallback keyword extraction
-        words = re.findall(r"\b[a-zA-Z_]{4,}\b", cleaned)
-        for w in words[:2]:
-            if w not in {"theorem", "lemma", "where", "have", "intro", "exact"}:
-                queries.append(w)
+        if "Real.log" in clean_stmt or "log" in clean_stmt:
+            queries.append("Real.log (_ * _)")
+            queries.append("Real.log_pos")
 
         for q in queries[:4]:
-            hits = self.query_loogle(q, limit=5)
+            hits = self.query_loogle(q, limit=4)
             for h in hits:
                 if h.name not in seen_names:
                     seen_names.add(h.name)
@@ -91,8 +149,9 @@ class PremiseRetriever:
         if not premises:
             return ""
         lines = [
-            "### Relevant Verified Mathlib Lemmas (Use these exact identifiers):"
+            "### Relevant Verified Mathlib Lemmas (Use these exact identifiers and modules):"
         ]
         for p in premises:
-            lines.append(f"- `{p.name}` : `{p.type_sig}`")
+            mod_info = f" (import {p.module})" if p.module else ""
+            lines.append(f"- `{p.name}` : `{p.type_sig}`{mod_info}")
         return "\n".join(lines)

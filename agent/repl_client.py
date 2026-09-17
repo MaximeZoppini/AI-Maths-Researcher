@@ -45,6 +45,9 @@ class REPLResponse:
         """Returns True if the code compiled without errors (sorries are permitted)."""
         return not self.has_errors
 
+import queue
+import threading
+
 class LeanREPL:
     def __init__(
         self,
@@ -52,13 +55,19 @@ class LeanREPL:
         container_id: str = "200",
         project_dir: str = "/home/lean/projects/sun-formal",
         repl_bin: str = "/home/lean/repl/.lake/build/bin/repl",
+        full_mathlib: bool = False,
+        default_timeout_sec: float = 25.0
     ):
         self.host = host
         self.container_id = container_id
         self.project_dir = project_dir
         self.repl_bin = repl_bin
+        self.full_mathlib = full_mathlib
+        self.default_timeout_sec = default_timeout_sec
         self.process: Optional[subprocess.Popen] = None
         self.base_env: Optional[int] = None
+        self.line_queue: Optional[queue.Queue] = None
+        self._is_warmup: bool = False
 
     def start(self):
         """Starts the persistent Lean REPL process over SSH and preloads Mathlib."""
@@ -80,20 +89,50 @@ class LeanREPL:
         )
         self.base_env = None
 
-        # Preload standard Mathlib modules into base_env
-        warmup_cmd = (
-            "import Mathlib.Tactic\n"
-            "import Mathlib.Algebra.Ring.Parity\n"
-            "import Mathlib.Data.Real.Basic\n"
-            "import Mathlib.Data.Nat.Factorial.Basic\n"
-            "open scoped Nat\n"
-            "open scoped Real\n"
-            "set_option linter.style.header false\n\n"
-            "theorem __base_init__ : True := trivial"
-        )
-        resp = self.send_request({"cmd": warmup_cmd})
-        if resp.env is not None:
-            self.base_env = resp.env
+        # Start dedicated background thread to read stdout lines into queue
+        self.line_queue = queue.Queue()
+        def _stdout_worker():
+            try:
+                for line in iter(self.process.stdout.readline, ""):
+                    if self.line_queue is not None:
+                        self.line_queue.put(line)
+            except Exception:
+                pass
+        reader_thread = threading.Thread(target=_stdout_worker, daemon=True)
+        reader_thread.start()
+
+        # Preload Mathlib modules into base_env
+        self._is_warmup = True
+        try:
+            if self.full_mathlib:
+                print("⏳ Initialisation REPL avec Mathlib complet (peut prendre ~2 min)...")
+                warmup_cmd = (
+                    "import Mathlib\n"
+                    "open scoped Nat\n"
+                    "open scoped Real\n"
+                    "set_option linter.style.header false\n\n"
+                    "theorem __base_init__ : True := trivial"
+                )
+                warmup_timeout = 180.0
+            else:
+                # Fast comprehensive Mathlib suite (takes ~4s)
+                warmup_cmd = (
+                    "import Mathlib.Tactic\n"
+                    "import Mathlib.Algebra.Ring.Parity\n"
+                    "import Mathlib.Data.Real.Basic\n"
+                    "import Mathlib.Data.Nat.Factorial.Basic\n"
+                    "open scoped Nat\n"
+                    "open scoped Real\n"
+                    "set_option linter.style.header false\n\n"
+                    "theorem __base_init__ : True := trivial"
+                )
+                warmup_timeout = 30.0
+
+            resp = self.send_request({"cmd": warmup_cmd}, timeout_sec=warmup_timeout)
+            if resp.env is not None:
+                self.base_env = resp.env
+        finally:
+            self._is_warmup = False
 
     def close(self):
         """Terminates the REPL process."""
@@ -108,6 +147,7 @@ class LeanREPL:
                     pass
             self.process = None
             self.base_env = None
+            self.line_queue = None
 
     def __enter__(self):
         self.start()
@@ -116,25 +156,62 @@ class LeanREPL:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
-    def send_request(self, payload: Dict[str, Any]) -> REPLResponse:
-        """Sends a raw JSON request to REPL and parses the response."""
+    def send_request(self, payload: Dict[str, Any], timeout_sec: Optional[float] = None) -> REPLResponse:
+        """Sends a raw JSON request to REPL and parses the response with strict timeout and auto-recovery."""
         if not self.process or self.process.poll() is not None:
             self.start()
 
+        effective_timeout = timeout_sec if timeout_sec is not None else self.default_timeout_sec
         t0 = time.perf_counter()
         req_str = json.dumps(payload) + "\n\n"
-        self.process.stdin.write(req_str)
-        self.process.stdin.flush()
+        try:
+            self.process.stdin.write(req_str)
+            self.process.stdin.flush()
+        except (BrokenPipeError, OSError):
+            print("⚠️ Pipe REPL brisé. Redémarrage...")
+            self.close()
+            self.start()
+            self.process.stdin.write(req_str)
+            self.process.stdin.flush()
 
-        # Read JSON response until blank line
+        # Read JSON response with timeout from thread-safe queue
         lines = []
+        deadline = time.perf_counter() + effective_timeout
+        timed_out = False
+
         while True:
-            line = self.process.stdout.readline()
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                timed_out = True
+                break
+
+            try:
+                line = self.line_queue.get(timeout=max(0.01, remaining))
+            except (queue.Empty, AttributeError):
+                timed_out = True
+                break
+
             if not line:
                 break
             if line.strip() == "" and lines:
                 break
             lines.append(line)
+
+        if timed_out:
+            print(f"\n⏱️ REPL Timeout dépassé ({effective_timeout:.1f}s). Redémarrage automatique...")
+            self.close()
+            self.start()
+            return REPLResponse(
+                raw={"error": "timeout"},
+                env=self.base_env,
+                messages=[
+                    REPLMessage(
+                        severity="error",
+                        data=f"Tactic evaluation timed out (> {effective_timeout:.1f}s). The tactic likely diverged. Please try an alternative approach or decompose using intermediate lemmas."
+                    )
+                ],
+                duration_ms=effective_timeout * 1000
+            )
 
         t1 = time.perf_counter()
         duration_ms = (t1 - t0) * 1000
@@ -185,7 +262,7 @@ class LeanREPL:
             duration_ms=duration_ms
         )
 
-    def check_code(self, code: str) -> REPLResponse:
+    def check_code(self, code: str, timeout_sec: Optional[float] = None) -> REPLResponse:
         """
         Executes candidate Lean code in the preloaded Mathlib base environment.
         Strips redundant import lines since Mathlib is already in memory.
@@ -198,4 +275,4 @@ class LeanREPL:
         if self.base_env is not None:
             payload["env"] = self.base_env
 
-        return self.send_request(payload)
+        return self.send_request(payload, timeout_sec=timeout_sec)

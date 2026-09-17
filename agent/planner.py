@@ -77,11 +77,14 @@ Format your answer as:
 <Lean 4 code>
 ```
 """
+        blueprint_model = "deepseek-reasoner" if self.llm.deepseek_key else self.config.model
+        print(f"📐 Élaboration du Blueprint via {blueprint_model}...")
         raw_output, p_tok, c_tok, cost = self.llm.generate(
             prompt=prompt,
             theorem_decl=theorem_decl,
             iteration=1,
-            temperature=0.2
+            temperature=0.2,
+            model=blueprint_model
         )
 
         # Extract NL Plan

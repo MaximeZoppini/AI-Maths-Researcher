@@ -10,10 +10,23 @@ import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-DB_PATH = Path("/tmp/ai_maths_data/attempts.db")
+DB_PATH = Path("data/attempts.db")
+BACKUP_DIR = Path("data/backups")
+PERSISTENT_STORE = Path("/var/tmp/ai_maths_data/attempts.db")
 
 def init_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
+    PERSISTENT_STORE.parent.mkdir(parents=True, exist_ok=True)
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Under macOS Documents sandbox, symlink data/attempts.db -> /var/tmp/...
+    if str(db_path) == str(DB_PATH) and not db_path.exists():
+        if not PERSISTENT_STORE.exists():
+            PERSISTENT_STORE.touch()
+        try:
+            db_path.symlink_to(PERSISTENT_STORE)
+        except Exception:
+            pass
+
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     with conn:
@@ -78,16 +91,50 @@ class AttemptsDB:
             )
             return cursor.lastrowid
 
+    def backup(self) -> Path:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = BACKUP_DIR / f"attempts_{timestamp}.sql"
+        latest_file = BACKUP_DIR / "attempts_latest.sql"
+        try:
+            dump = "\n".join(self.conn.iterdump())
+            backup_file.write_text(dump, encoding="utf-8")
+            latest_file.write_text(dump, encoding="utf-8")
+            print(f"💾 Sauvegarde SQLite créée : {backup_file}")
+            return backup_file
+        except Exception as e:
+            # Fallback to /var/tmp if permissions fail
+            alt_backup = PERSISTENT_STORE.parent / f"attempts_{timestamp}.sql"
+            dump = "\n".join(self.conn.iterdump())
+            alt_backup.write_text(dump, encoding="utf-8")
+            print(f"💾 Sauvegarde SQLite alternative créée : {alt_backup} (erreur: {e})")
+            return alt_backup
+
     def get_summary(self) -> Dict[str, Any]:
         with self.conn:
             total_attempts = self.conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0]
             success_count = self.conn.execute("SELECT COUNT(*) FROM attempts WHERE success = 1").fetchone()[0]
-            unique_problems = self.conn.execute("SELECT COUNT(DISTINCT problem_name) FROM attempts").fetchone()[0]
-            solved_problems = self.conn.execute(
-                "SELECT COUNT(DISTINCT problem_name) FROM attempts WHERE success = 1"
-            ).fetchone()[0]
             total_cost = self.conn.execute("SELECT COALESCE(SUM(cost_usd), 0.0) FROM attempts").fetchone()[0]
             avg_duration = self.conn.execute("SELECT COALESCE(AVG(duration_ms), 0.0) FROM attempts").fetchone()[0]
+
+            # Distinguer les problèmes de base des sous-lemmes (_stepN)
+            all_problem_rows = self.conn.execute("SELECT problem_name, success FROM attempts").fetchall()
+            base_problems = set()
+            solved_base = set()
+            sub_lemmas = set()
+            solved_sub_lemmas = set()
+
+            for r in all_problem_rows:
+                name = r["problem_name"]
+                succ = (r["success"] == 1)
+                if "_step" in name:
+                    sub_lemmas.add(name)
+                    if succ:
+                        solved_sub_lemmas.add(name)
+                else:
+                    base_problems.add(name)
+                    if succ:
+                        solved_base.add(name)
 
             model_rows = self.conn.execute("""
                 SELECT model,
@@ -112,9 +159,11 @@ class AttemptsDB:
                 "total_attempts": total_attempts,
                 "success_count": success_count,
                 "attempt_success_rate": (success_count / total_attempts) if total_attempts > 0 else 0.0,
-                "unique_problems": unique_problems,
-                "solved_problems": solved_problems,
-                "problem_solve_rate": (solved_problems / unique_problems) if unique_problems > 0 else 0.0,
+                "base_problems_count": len(base_problems),
+                "solved_base_count": len(solved_base),
+                "base_solve_rate": (len(solved_base) / len(base_problems)) if base_problems else 0.0,
+                "sub_lemmas_count": len(sub_lemmas),
+                "solved_sub_lemmas_count": len(solved_sub_lemmas),
                 "total_cost_usd": total_cost,
                 "avg_duration_ms": avg_duration,
                 "models": models
