@@ -8,7 +8,7 @@ import re
 import argparse
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 from agent.prover import ProofSearchEngine, ProverConfig
 from agent.db import AttemptsDB
@@ -47,23 +47,40 @@ def safe_write_file(path: Path, content: str):
         import subprocess
         subprocess.run(["sh", "-c", f"cat > '{path}'"], input=content, text=True, check=True)
 
-def run_benchmark(limit: int = 50, attempts: int = 3, model: str = "gemini-2.5-flash"):
+from agent.planner import BlueprintPlanner
+
+def run_benchmark(limit: int = 50, attempts: int = 3, model: str = "deepseek-chat", use_blueprint: bool = True, name_filter: Optional[str] = None):
     content = fetch_minif2f_test()
     theorems = parse_theorems(content)
-    selected = theorems[:limit]
+    
+    if name_filter:
+        selected = [t for t in theorems if t[0] == name_filter]
+        if not selected:
+            print(f"⚠️ Problème '{name_filter}' introuvable dans MiniF2F.")
+            return
+    else:
+        selected = theorems[:limit]
 
     print("\n" + "=" * 60)
     print(f"🏁 Démarrage du Benchmark MiniF2F Lean 4 ({len(selected)} problèmes)")
-    print(f"Modèle : {model} | Tentatives max par problème : {attempts}")
+    print(f"Modèle : {model} | Tentatives max par problème : {attempts} | Mode Blueprint : {use_blueprint}")
     print("=" * 60)
 
     engine = ProofSearchEngine(config=ProverConfig(max_attempts=attempts, model=model))
+    planner = BlueprintPlanner(config=ProverConfig(max_attempts=attempts, model=model)) if use_blueprint else None
     db = AttemptsDB()
 
     solved_count = 0
     for idx, (name, decl) in enumerate(selected, 1):
         print(f"\n[{idx}/{len(selected)}] Problème : {name}")
+        # Étape 1 : Stratégie A (Preuve directe)
         success, code = engine.prove_theorem(decl, problem_name=name)
+        
+        # Étape 2 : Si échec et Blueprint activé, bascule vers Phase 2
+        if not success and planner:
+            print(f"  🔄 Échec direct -> Activation du Blueprint Planner (Phase 2)...")
+            success, code = planner.prove_with_blueprint(decl, problem_name=name)
+
         if success:
             solved_count += 1
             out_file = Path("problems") / f"minif2f_{name}.lean"
@@ -80,10 +97,18 @@ def main():
     parser = argparse.ArgumentParser(description="MiniF2F Benchmark Runner")
     parser.add_argument("--limit", type=int, default=10, help="Nombre de problèmes à tester (default: 10)")
     parser.add_argument("--attempts", type=int, default=3, help="Nombre d'essais max par problème (default: 3)")
-    parser.add_argument("--model", type=str, default="gemini-2.5-flash", help="Modèle LLM cible")
+    parser.add_argument("--model", type=str, default="deepseek-chat", help="Modèle LLM cible")
+    parser.add_argument("--no-blueprint", action="store_true", help="Désactiver le repli sur le Blueprint Planner")
+    parser.add_argument("--name", type=str, default=None, help="Tester un problème spécifique par son nom")
     args = parser.parse_args()
 
-    run_benchmark(limit=args.limit, attempts=args.attempts, model=args.model)
+    run_benchmark(
+        limit=args.limit,
+        attempts=args.attempts,
+        model=args.model,
+        use_blueprint=not args.no_blueprint,
+        name_filter=args.name
+    )
 
 if __name__ == "__main__":
     main()

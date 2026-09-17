@@ -36,6 +36,7 @@ class ProverConfig:
     budget_usd: float = 1.00
     model: str = "deepseek-chat"
     temperature: float = 0.2
+    dynamic_temperature: bool = True
     timeout_per_attempt_sec: int = 15
 
 class LLMProvider:
@@ -183,7 +184,16 @@ class ProofSearchEngine:
         )
 
         if not code.startswith("import"):
-            code = "import Mathlib.Tactic\nimport Mathlib.Data.Real.Basic\nimport Mathlib.Algebra.Ring.Parity\n\nset_option linter.style.header false\n\n" + code
+            code = (
+                "import Mathlib.Tactic\n"
+                "import Mathlib.Data.Real.Basic\n"
+                "import Mathlib.Algebra.Ring.Parity\n"
+                "import Mathlib.Data.Nat.Factorial.Basic\n\n"
+                "open scoped Nat\n"
+                "open scoped Real\n\n"
+                "set_option linter.style.header false\n\n"
+                + code
+            )
 
         return code
 
@@ -191,7 +201,8 @@ class ProofSearchEngine:
         self,
         theorem_decl: str,
         premises: List[Premise],
-        history: List[Dict[str, Any]]
+        history: List[Dict[str, Any]],
+        context_code: str = ""
     ) -> str:
         prompt_parts = [
             "You are an expert Lean 4 and Mathlib formal mathematician.",
@@ -199,10 +210,13 @@ class ProofSearchEngine:
             "CRITICAL RULES:",
             "1. Output ONLY valid Lean 4 code inside a ```lean ... ``` code block.",
             "2. Do NOT use `sorry` or unofficial axioms.",
-            "3. Use standard Mathlib tactics: `omega`, `ring`, `linarith`, `nlinarith`, `aesop`, `subst_vars`, `norm_num`, `rcases`, `have`, `calc`, `rw`, `exact?`.",
+            "3. Use standard Mathlib tactics: `omega`, `ring`, `linarith`, `nlinarith`, `decide`, `aesop`, `subst_vars`, `norm_num`, `rcases`, `have`, `calc`, `rw`, `zify`, `exact?`.",
             "4. Include all necessary Mathlib imports at the top.\n",
             f"### Target Theorem Declaration:\n```lean\n{theorem_decl}\n```\n"
         ]
+
+        if context_code:
+            prompt_parts.append("### Available Lemmas in Context:\n```lean\n" + context_code.strip() + "\n```\n")
 
         if premises:
             prompt_parts.append(self.retriever.format_prompt_block(premises) + "\n")
@@ -219,7 +233,13 @@ class ProofSearchEngine:
         prompt_parts.append("Provide the complete, corrected Lean 4 code:")
         return "\n".join(prompt_parts)
 
-    def prove_theorem(self, theorem_decl: str, problem_name: str = "Candidate") -> Tuple[bool, str]:
+    def prove_theorem(
+        self,
+        theorem_decl: str,
+        problem_name: str = "Candidate",
+        context_code: str = "",
+        external_repl: Optional[LeanREPL] = None
+    ) -> Tuple[bool, str]:
         print(f"\n🧠 Lancement de la recherche de preuve pour '{problem_name}'...")
         print(f"Modèle actif : {self.llm.model}")
         print(f"Énoncé : {theorem_decl.strip().splitlines()[0]}")
@@ -231,40 +251,48 @@ class ProofSearchEngine:
         history: List[Dict[str, Any]] = []
         total_cost = 0.0
 
-        with LeanREPL() as repl:
+        def _run_loop(repl: LeanREPL) -> Tuple[bool, str]:
+            nonlocal total_cost
             for iteration in range(1, self.config.max_attempts + 1):
                 if total_cost >= self.config.budget_usd:
                     print(f"⚠️ Budget limite de ${self.config.budget_usd:.2f} atteint. Arrêt.")
                     break
 
-                prompt = self.build_prompt(theorem_decl, premises, history)
-                print(f"\n[Tentative {iteration}/{self.config.max_attempts}] Génération de preuve ({self.llm.model})...")
+                current_temp = (
+                    min(0.8, 0.1 + (iteration - 1) * 0.15)
+                    if self.config.dynamic_temperature
+                    else self.config.temperature
+                )
+
+                prompt = self.build_prompt(theorem_decl, premises, history, context_code=context_code)
+                print(f"\n[Tentative {iteration}/{self.config.max_attempts}] Génération de preuve ({self.llm.model}, temp={current_temp:.2f})...")
 
                 raw_llm, p_tok, c_tok, cost = self.llm.generate(
                     prompt,
                     theorem_decl=theorem_decl,
                     iteration=iteration,
-                    temperature=self.config.temperature
+                    temperature=current_temp
                 )
                 total_cost += cost
 
                 candidate_code = self.sanitize_code(raw_llm, theorem_decl)
+                full_test_code = (context_code + "\n\n" + candidate_code).strip() if context_code else candidate_code
 
                 # Level 1 Verification (REPL in ~50ms)
                 print(f"  ⚡ Test rapide via LeanREPL...")
-                repl_resp = repl.check_code(candidate_code)
+                repl_resp = repl.check_code(full_test_code)
 
                 if repl_resp.is_success:
                     print(f"  ✨ REPL validé en {repl_resp.duration_ms:.1f}ms ! Envoi au Juge Final (LXC Prod)...")
                     
-                    prod_res = self.verifier.verify_file_content(candidate_code, temp_name=f"{problem_name}.lean")
+                    prod_res = self.verifier.verify_file_content(full_test_code, temp_name=f"{problem_name}.lean")
                     
                     self.db.record_attempt(
                         problem_name=problem_name,
                         iteration=iteration,
                         model=self.llm.model,
                         prompt=prompt,
-                        candidate_code=candidate_code,
+                        candidate_code=full_test_code,
                         success=prod_res.success,
                         compiler_errors=prod_res.error_message,
                         duration_ms=repl_resp.duration_ms,
@@ -275,7 +303,7 @@ class ProofSearchEngine:
 
                     if prod_res.success:
                         print(f"  🏆 PREUVE CERTIFIÉE SANS FAUTE en {iteration} itération(s) !")
-                        return True, candidate_code
+                        return True, full_test_code
                     else:
                         print(f"  ⚠️ Rejet Juge Final : {prod_res.error_message}")
                         history.append({
@@ -287,27 +315,32 @@ class ProofSearchEngine:
                     err_text = "\n".join(repl_resp.error_texts)
                     goal_text = "\n".join(repl_resp.goals)
                     print(f"  ❌ Échec REPL ({repl_resp.duration_ms:.1f}ms) : {err_text[:120]}...")
-
-                    self.db.record_attempt(
-                        problem_name=problem_name,
-                        iteration=iteration,
-                        model=self.llm.model,
-                        prompt=prompt,
-                        candidate_code=candidate_code,
-                        success=False,
-                        compiler_errors=err_text,
-                        unsolved_goals=goal_text,
-                        duration_ms=repl_resp.duration_ms,
-                        prompt_tokens=p_tok,
-                        completion_tokens=c_tok,
-                        cost_usd=cost
-                    )
-
                     history.append({
                         "code": candidate_code,
                         "errors": err_text,
                         "goals": goal_text
                     })
+                    self.db.record_attempt(
+                        problem_name=problem_name,
+                        iteration=iteration,
+                        model=self.llm.model,
+                        prompt=prompt,
+                        candidate_code=full_test_code,
+                        success=False,
+                        compiler_errors=err_text,
+                        duration_ms=repl_resp.duration_ms,
+                        prompt_tokens=p_tok,
+                        completion_tokens=c_tok,
+                        cost_usd=cost
+                    )
+            return False, ""
 
-        print(f"\n❌ Échec : preuve non trouvée après {self.config.max_attempts} tentatives.")
-        return False, ""
+        if external_repl:
+            success, code = _run_loop(external_repl)
+        else:
+            with LeanREPL() as repl:
+                success, code = _run_loop(repl)
+
+        if not success:
+            print(f"❌ Échec : preuve non trouvée après {self.config.max_attempts} tentatives.")
+        return success, code

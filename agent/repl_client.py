@@ -79,6 +79,10 @@ class LeanREPL:
         warmup_cmd = (
             "import Mathlib.Tactic\n"
             "import Mathlib.Algebra.Ring.Parity\n"
+            "import Mathlib.Data.Real.Basic\n"
+            "import Mathlib.Data.Nat.Factorial.Basic\n"
+            "open scoped Nat\n"
+            "open scoped Real\n"
             "set_option linter.style.header false\n\n"
             "theorem __base_init__ : True := trivial"
         )
