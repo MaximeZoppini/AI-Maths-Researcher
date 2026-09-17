@@ -302,7 +302,7 @@ def main():
     parser = argparse.ArgumentParser(description="MiniF2F Benchmark Runner")
     parser.add_argument("--limit", type=int, default=10, help="Nombre de problèmes à tester (default: 10)")
     parser.add_argument("--attempts", type=int, default=3, help="Nombre d'essais max par problème (default: 3)")
-    parser.add_argument("--model", type=str, default="deepseek-chat", help="Modèle LLM cible")
+    parser.add_argument("--model", type=str, default="deepseek-flash", help="Modèle LLM cible (default: deepseek-flash)")
     parser.add_argument("--no-blueprint", action="store_true", help="Désactiver le repli sur le Blueprint Planner")
     parser.add_argument("--name", type=str, default=None, help="Tester un problème spécifique par son nom")
     parser.add_argument("--pass-k", type=int, default=1, help="Nombre de générations parallèles (default: 1)")

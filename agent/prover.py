@@ -8,6 +8,7 @@ import os
 import re
 import json
 import time
+import datetime
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,7 +46,23 @@ def get_deepseek_balance(api_key: Optional[str] = None) -> Optional[float]:
                 return float(infos[0].get("total_balance", 0.0))
     except Exception:
         pass
-    return None
+def is_deepseek_offpeak(dt: Optional[datetime.datetime] = None) -> bool:
+    """
+    Vérifie si le moment actuel correspond aux heures creuses DeepSeek (-50% sur les tokens) :
+    - Samedi et Dimanche : 100% en heures creuses (week-end entier).
+    - Lundi à Vendredi : Heures creuses en dehors des pics 01:00-04:00 UTC et 06:00-10:00 UTC.
+    """
+    now = dt or datetime.datetime.now(datetime.timezone.utc)
+    if now.weekday() in (5, 6):  # 5 = Samedi, 6 = Dimanche
+        return True
+    hour = now.hour
+    is_peak = (1 <= hour < 4) or (6 <= hour < 10)
+    return not is_peak
+
+DEEPSEEK_MODEL_ALIASES = {
+    "deepseek-chat": "deepseek-flash",
+    "deepseek-reasoner": "deepseek-v4-pro"
+}
 
 load_dotenv()
 
@@ -53,7 +70,7 @@ load_dotenv()
 class ProverConfig:
     max_attempts: int = 6
     budget_usd: float = 1.00
-    model: str = "deepseek-chat"
+    model: str = "deepseek-flash"
     temperature: float = 0.2
     dynamic_temperature: bool = True
     timeout_per_attempt_sec: int = 25
@@ -73,9 +90,9 @@ class LLMProvider:
         self.openai_key = os.environ.get("OPENAI_API_KEY")
         
         if model:
-            self.model = model
+            self.model = DEEPSEEK_MODEL_ALIASES.get(model, model)
         elif self.deepseek_key:
-            self.model = "deepseek-chat"
+            self.model = "deepseek-flash"
         elif self.gemini_key:
             self.model = "gemini-2.5-flash"
         elif self.openai_key:
@@ -104,46 +121,64 @@ class LLMProvider:
         else:
             return self._fallback_tactic_generator(theorem_decl, iteration)
 
-    def _call_deepseek(self, prompt: str, temperature: float, model: str = "deepseek-chat") -> Tuple[str, int, int, float]:
+    def _call_deepseek(self, prompt: str, temperature: float, model: str = "deepseek-flash") -> Tuple[str, int, int, float]:
         url = "https://api.deepseek.com/chat/completions"
-        is_reasoner = (model == "deepseek-reasoner")
+        # Mappage des anciens alias vers les identifiants officiels avec compatibilité
+        if model in DEEPSEEK_MODEL_ALIASES:
+            target_model = DEEPSEEK_MODEL_ALIASES[model]
+        else:
+            target_model = model
+
+        is_pro = (target_model in ("deepseek-v4-pro", "deepseek-reasoner"))
 
         payload: Dict[str, Any] = {
-            "model": model,
+            "model": target_model,
             "messages": [
                 {"role": "system", "content": "You are an elite formal mathematician specialized in Lean 4 and Mathlib. Output only valid Lean 4 code inside ```lean ... ``` without truncation."},
                 {"role": "user", "content": prompt}
             ],
-            "max_tokens": 8192 if is_reasoner else 4096
+            "max_tokens": 8192 if is_pro else 4096,
+            "temperature": temperature
         }
-        # DeepSeek reasoner does not accept temperature
-        if not is_reasoner:
-            payload["temperature"] = temperature
 
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.deepseek_key}"}
         )
-        timeout_http = 120 if is_reasoner else 35
+        timeout_http = 120 if is_pro else 35
         with urllib.request.urlopen(req, timeout=timeout_http) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             choice = data["choices"][0]["message"]
             text = choice.get("content") or ""
             reasoning = choice.get("reasoning_content") or ""
-            if reasoning and is_reasoner:
-                print(f"    💭 DeepSeek Reasoner ({len(reasoning)} caractères de CoT)...")
+            if reasoning:
+                print(f"    💭 DeepSeek ({target_model}) : {len(reasoning)} caractères de CoT...")
             usage = data.get("usage", {})
             p_tok = usage.get("prompt_tokens", 0)
             c_tok = usage.get("completion_tokens", 0)
             cache_hit = usage.get("prompt_cache_hit_tokens", 0)
             cache_miss = usage.get("prompt_cache_miss_tokens", max(0, p_tok - cache_hit))
 
-            # Facturation exacte avec réduction cache-hit DeepSeek
-            if is_reasoner:
-                cost = (cache_hit * 0.00000014) + (cache_miss * 0.00000055) + (c_tok * 0.00000219)
+            # Facturation officielle DeepSeek selon les heures creuses (Off-Peak -50%)
+            off_peak = is_deepseek_offpeak()
+            if is_pro:
+                # deepseek-v4-pro:
+                # Off-Peak: hit $0.022/1M, miss $0.66/1M, out $1.98/1M
+                # Peak:     hit $0.044/1M, miss $1.32/1M, out $3.96/1M
+                if off_peak:
+                    cost = (cache_hit * 0.000000022) + (cache_miss * 0.00000066) + (c_tok * 0.00000198)
+                else:
+                    cost = (cache_hit * 0.000000044) + (cache_miss * 0.00000132) + (c_tok * 0.00000396)
             else:
-                cost = (cache_hit * 0.00000007) + (cache_miss * 0.00000014) + (c_tok * 0.00000028)
+                # deepseek-flash:
+                # Off-Peak: hit $0.003/1M, miss $0.15/1M, out $0.60/1M
+                # Peak:     hit $0.006/1M, miss $0.30/1M, out $1.20/1M
+                if off_peak:
+                    cost = (cache_hit * 0.000000003) + (cache_miss * 0.00000015) + (c_tok * 0.00000060)
+                else:
+                    cost = (cache_hit * 0.000000006) + (cache_miss * 0.00000030) + (c_tok * 0.00000120)
+
             return text, p_tok, c_tok, cost
 
     def _call_gemini(self, prompt: str, temperature: float, model: str = "gemini-2.5-flash") -> Tuple[str, int, int, float]:
@@ -394,11 +429,11 @@ class ProofSearchEngine:
                     p_succ = cls_stats.get("p_success", 0.0) if cls_stats.get("attempted", 0) >= 3 else 0.20
                     is_paid_bounty = getattr(self.config, "is_paid_bounty", False)
 
-                    # Règle Tâche 9 : Ne JAMAIS escalader si p_success < 0.15 (ex: imo) sauf si bounty payant
+                    # Règle Tâches 9 & 10 : Ne JAMAIS escalader si p_success < 0.15 (ex: imo) sauf si bounty payant
                     if p_succ >= 0.15 or is_paid_bounty:
-                        active_model = "deepseek-reasoner"
+                        active_model = "deepseek-v4-pro"
                     else:
-                        print(f"  ℹ️ Escalade reasoner bloquée pour classe '{diff_class}' (p_success {p_succ*100:.1f}% < 15% et non-bounty). Maintien sur {self.config.model}.")
+                        print(f"  ℹ️ Escalade pro bloquée pour classe '{diff_class}' (p_success {p_succ*100:.1f}% < 15% et non-bounty). Maintien sur {self.config.model}.")
                         active_model = self.config.model
                 else:
                     active_model = self.config.model

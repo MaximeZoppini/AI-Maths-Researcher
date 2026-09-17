@@ -61,7 +61,7 @@ def config_for(target: Target, p_success: float) -> ProverConfig:
     """
     if target.kind == "benchmark":
         return ProverConfig(
-            model="deepseek-chat",
+            model="deepseek-flash",
             max_attempts=2,
             pass_k=2,
             enable_escalation=False,
@@ -72,7 +72,7 @@ def config_for(target: Target, p_success: float) -> ProverConfig:
 
     elif target.kind == "training":
         return ProverConfig(
-            model="deepseek-chat",
+            model="deepseek-flash",
             max_attempts=1,
             pass_k=1,
             enable_escalation=False,
@@ -83,7 +83,7 @@ def config_for(target: Target, p_success: float) -> ProverConfig:
 
     elif target.kind == "mathlib":
         return ProverConfig(
-            model="deepseek-chat",
+            model="deepseek-flash",
             max_attempts=4,
             pass_k=1,
             enable_escalation=True,
@@ -99,7 +99,7 @@ def config_for(target: Target, p_success: float) -> ProverConfig:
         pass_k = 4 if target.value_usd >= 100 else 2
 
         return ProverConfig(
-            model="deepseek-chat",
+            model="deepseek-flash",
             max_attempts=4,
             pass_k=pass_k,
             enable_escalation=True,
@@ -111,7 +111,7 @@ def config_for(target: Target, p_success: float) -> ProverConfig:
 
     else:
         return ProverConfig(
-            model="deepseek-chat",
+            model="deepseek-flash",
             max_attempts=3,
             pass_k=1,
             enable_escalation=True,

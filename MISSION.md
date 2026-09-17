@@ -246,6 +246,35 @@ Correctifs implémentés et validés :
 
 ---
 
+## TÂCHE 10 — Migration des identifiants de modèles DeepSeek (découvert à l'audit du soir) — ✅ TERMINÉE
+
+Vérifié le 2026-09-17 via `GET https://api.deepseek.com/models` : l'API ne sert plus
+officiellement que **`deepseek-flash`** et **`deepseek-v4-pro`**. Nos appels
+`deepseek-chat` / `deepseek-reasoner` fonctionnent via des alias hérités — fragile
+(peuvent disparaître sans préavis) et nos constantes de prix dans `prover.py` sont fausses.
+
+Réalisations implémentées & validées :
+
+1. **IDs officiels [✅ IMPLÉMENTÉ] :** Bascule de `LLMProvider` sur `deepseek-flash`
+   (remplace chat) et `deepseek-v4-pro` (remplace reasoner). Rétrocompatibilité
+   assurée via dictionnaire `DEEPSEEK_MODEL_ALIASES` pour router les anciens noms.
+2. **Grille officielle & heures creuses (-50%) [✅ IMPLÉMENTÉ] :** Constantes de coût
+   actualisées avec cache hit/miss séparés et intégration dynamique de `is_deepseek_offpeak()`
+   (heures creuses les nuits UTC et tout le week-end samedi/dimanche).
+3. **Micro-benchmark de non-régression [✅ VALIDÉ] :**
+   - `mathd_algebra_141` : Résolu en 1 itération via `deepseek-flash` ($0.00119 USD).
+   - `mathd_algebra_33` : Réparation réussie en 2 itérations via `deepseek-flash` ($0.00472 USD).
+   - `mathd_algebra_478` : Résolu en 1 itération via `deepseek-flash` ($0.00057 USD).
+   - 100 % de succès certifiés sans sorry par le Juge Final.
+4. **Plafond tokens & contrôle pro [✅ IMPLÉMENTÉ] :** `max_tokens` maintenu à 8192
+   pour `deepseek-v4-pro`, escalade conditionnée à $p_{\text{success}} \ge 15\%$
+   ou bounty rémunéré.
+
+**Acceptation validée :** Tous les appels API utilisent les identifiants officiels
+de `GET /models` ; calcul de coût actualisé avec réduction -50 % en heures creuses.
+
+---
+
 ## Après cette mission
 
 Plus AUCUN développement du harnais sans preuve qu'un composant est le facteur

@@ -77,7 +77,7 @@ Format your answer as:
 <Lean 4 code>
 ```
 """
-        blueprint_model = "deepseek-reasoner" if self.llm.deepseek_key else self.config.model
+        blueprint_model = "deepseek-v4-pro" if self.llm.deepseek_key else self.config.model
         print(f"📐 Élaboration du Blueprint via {blueprint_model}...")
         raw_output, p_tok, c_tok, cost = self.llm.generate(
             prompt=prompt,
