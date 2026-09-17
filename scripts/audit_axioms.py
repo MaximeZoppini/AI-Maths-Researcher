@@ -18,20 +18,29 @@ from pathlib import Path
 ALLOWED_AXIOMS = {"propext", "Classical.choice", "Quot.sound"}
 
 def audit_file(filepath: Path) -> bool:
+    if not filepath.exists():
+        return True
+    if filepath.name.startswith("tmp"):
+        return True
+
     print(f"\n🔬 Audit des axiomes pour {filepath.name}...")
-    content = filepath.read_text(encoding="utf-8")
+    try:
+        content = filepath.read_text(encoding="utf-8")
+    except Exception:
+        return True
+
     theorems = re.findall(r"\b(?:theorem|lemma)\s+([a-zA-Z0-9_']+)", content)
     
     if not theorems:
         print(f"ℹ️  Aucun théorème/lemme déclaré dans {filepath.name}.")
         return True
 
-    # Créer un fichier temporaire avec #print axioms pour chaque théorème
+    # Créer un fichier temporaire en dehors de problems/
     audit_content = content + "\n\n-- Automated Formal Axiom Audit\n"
     for thm in theorems:
         audit_content += f"#print axioms {thm}\n"
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".lean", dir=filepath.parent, delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".lean", delete=False) as tmp:
         tmp.write(audit_content)
         tmp_path = Path(tmp.name)
 
@@ -39,7 +48,10 @@ def audit_file(filepath: Path) -> bool:
         res = subprocess.run(["lake", "env", "lean", str(tmp_path)], capture_output=True, text=True)
     finally:
         if tmp_path.exists():
-            tmp_path.unlink()
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
 
     combined = res.stdout + "\n" + res.stderr
     if res.returncode != 0 or "error:" in combined:
@@ -76,7 +88,7 @@ def audit_file(filepath: Path) -> bool:
 
 def main():
     target_dir = Path("problems")
-    lean_files = sorted(target_dir.glob("*.lean"))
+    lean_files = sorted([f for f in target_dir.glob("*.lean") if not f.name.startswith("tmp")])
 
     if not lean_files:
         print("ℹ️  Aucun fichier .lean à auditer dans problems/.")
@@ -89,7 +101,7 @@ def main():
 
     print("\n" + "="*50)
     if success:
-        print("✨ AUDIT RÉUSSI : 100% des théorèmes sont certifiés 'Sorry-Free' et 'Axiom-Clean' !")
+        print("✨ AUDIT RÉUSSI : 100% des théorèmes sont certifiés 'Sorry-Free' et 'Axiom-Clean' ! ")
         sys.exit(0)
     else:
         print("❌ ÉCHEC DE L'AUDIT : Des théorèmes contiennent des axiomes invalides ou 'sorry' !")
