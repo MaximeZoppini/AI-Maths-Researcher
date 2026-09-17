@@ -30,8 +30,10 @@ class RemoteProdVerifier:
         Sends Lean code via stdin over SSH, runs Lean compiler + #print axioms on the LXC container,
         and returns complete mathematical and syntactic verification.
         """
-        # Find all theorems and lemmas declared in the file
-        theorems = re.findall(r"\b(?:theorem|lemma)\s+([a-zA-Z0-9_']+)", lean_code)
+        # Find all theorems and lemmas declared in the file (ignoring comments)
+        clean_code = re.sub(r"/-[\s\S]*?-/", "", lean_code)
+        clean_code = re.sub(r"--.*$", "", clean_code, flags=re.MULTILINE)
+        theorems = re.findall(r"\b(?:theorem|lemma)\s+([a-zA-Z0-9_']+)", clean_code)
         
         # Prepare code with #print axioms appended for each theorem
         audit_code = lean_code

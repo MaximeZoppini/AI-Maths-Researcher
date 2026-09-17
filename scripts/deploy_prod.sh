@@ -24,6 +24,7 @@ ssh "root@$PROXMOX_HOST" "pct exec $CONTAINER_ID -- su - lean -c '
   echo \"📥 [Prod] git pull origin $CURRENT_BRANCH...\"
   git fetch origin $CURRENT_BRANCH
   git reset --hard origin/$CURRENT_BRANCH
+  git clean -fd problems/
   echo \"🔨 [Prod] lake build...\"
   lake build
   echo \"🔍 [Prod] Exécution de check.sh...\"

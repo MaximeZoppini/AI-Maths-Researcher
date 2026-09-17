@@ -29,7 +29,10 @@ def audit_file(filepath: Path) -> bool:
     except Exception:
         return True
 
-    theorems = re.findall(r"\b(?:theorem|lemma)\s+([a-zA-Z0-9_']+)", content)
+    # Strip comments so words like 'lemma' inside comments are ignored
+    clean_content = re.sub(r"/-[\s\S]*?-/", "", content)
+    clean_content = re.sub(r"--.*$", "", clean_content, flags=re.MULTILINE)
+    theorems = re.findall(r"\b(?:theorem|lemma)\s+([a-zA-Z0-9_']+)", clean_content)
     
     if not theorems:
         print(f"ℹ️  Aucun théorème/lemme déclaré dans {filepath.name}.")
@@ -61,6 +64,13 @@ def audit_file(filepath: Path) -> bool:
     # Analyser les axiomes pour chaque théorème
     all_ok = True
     for thm in theorems:
+        # Cas 1 : Théorème constructif pur sans aucun axiome
+        no_axiom_pattern = rf"'{re.escape(thm)}' does not depend on any axioms"
+        if re.search(no_axiom_pattern, combined):
+            print(f"  ✅ '{thm}' : Constructif pur (aucun axiome requis) -> []")
+            continue
+
+        # Cas 2 : Théorème avec axiomes
         pattern = rf"'{re.escape(thm)}' depends on axioms:\s*\[(.*?)\]"
         match = re.search(pattern, combined)
         if not match:
