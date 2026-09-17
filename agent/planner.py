@@ -95,7 +95,12 @@ Format your answer as:
 
         # Extract Lean Skeleton
         code_matches = re.findall(r"```lean(.*?)```", raw_output, re.DOTALL)
-        skeleton_code = code_matches[-1].strip() if code_matches else ""
+        if code_matches:
+            skeleton_code = code_matches[-1].strip()
+        else:
+            m = re.search(r"```lean([\s\S]*)$", raw_output)
+            skeleton_code = m.group(1).strip() if m else ""
+
         if not skeleton_code:
             return None
 

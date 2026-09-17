@@ -88,10 +88,10 @@ class LLMProvider:
         payload: Dict[str, Any] = {
             "model": model,
             "messages": [
-                {"role": "system", "content": "You are an elite formal mathematician specialized in Lean 4 and Mathlib. Output only valid Lean 4 code."},
+                {"role": "system", "content": "You are an elite formal mathematician specialized in Lean 4 and Mathlib. Output only valid Lean 4 code inside ```lean ... ``` without truncation."},
                 {"role": "user", "content": prompt}
             ],
-            "max_tokens": 8192 if is_reasoner else 2048
+            "max_tokens": 16384 if is_reasoner else 4096
         }
         # DeepSeek reasoner does not accept temperature
         if not is_reasoner:

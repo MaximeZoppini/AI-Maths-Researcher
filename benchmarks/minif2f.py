@@ -49,7 +49,17 @@ def safe_write_file(path: Path, content: str):
 
 from agent.planner import BlueprintPlanner
 
-def run_benchmark(limit: int = 50, attempts: int = 3, model: str = "deepseek-chat", use_blueprint: bool = True, name_filter: Optional[str] = None):
+import datetime
+
+def run_benchmark(
+    limit: int = 50,
+    attempts: int = 3,
+    model: str = "deepseek-chat",
+    use_blueprint: bool = True,
+    name_filter: Optional[str] = None,
+    pass_k: int = 1,
+    skip_solved: bool = False
+):
     content = fetch_minif2f_test()
     theorems = parse_theorems(content)
     
@@ -61,37 +71,93 @@ def run_benchmark(limit: int = 50, attempts: int = 3, model: str = "deepseek-cha
     else:
         selected = theorems[:limit]
 
+    # Filtrer les problèmes déjà résolus si demandé
+    if skip_solved:
+        filtered = []
+        for name, decl in selected:
+            out_file = Path("problems") / f"minif2f_{name}.lean"
+            if out_file.exists():
+                print(f"⏩ [Skip] '{name}' déjà résolu et certifié ({out_file.name}).")
+            else:
+                filtered.append((name, decl))
+        selected = filtered
+
     print("\n" + "=" * 60)
     print(f"🏁 Démarrage du Benchmark MiniF2F Lean 4 ({len(selected)} problèmes)")
-    print(f"Modèle : {model} | Tentatives max par problème : {attempts} | Mode Blueprint : {use_blueprint}")
+    print(f"Modèle : {model} | Essais max : {attempts} | pass@{pass_k} | Blueprint : {use_blueprint} | Escalade : Activée")
     print("=" * 60)
 
-    engine = ProofSearchEngine(config=ProverConfig(max_attempts=attempts, model=model))
-    planner = BlueprintPlanner(config=ProverConfig(max_attempts=attempts, model=model)) if use_blueprint else None
+    config = ProverConfig(
+        max_attempts=attempts,
+        model=model,
+        pass_k=pass_k,
+        enable_escalation=True,
+        timeout_per_attempt_sec=25
+    )
+    engine = ProofSearchEngine(config=config)
+    planner = BlueprintPlanner(config=config) if use_blueprint else None
     db = AttemptsDB()
 
     solved_count = 0
+    newly_solved = []
+    failed_problems = []
+
     for idx, (name, decl) in enumerate(selected, 1):
-        print(f"\n[{idx}/{len(selected)}] Problème : {name}")
-        # Étape 1 : Stratégie A (Preuve directe)
+        print(f"\n[{idx}/{len(selected)}] 🎯 Problème : {name}")
+        # Étape 1 : Stratégie A (Preuve directe avec escalade raisonnée et pass@k)
         success, code = engine.prove_theorem(decl, problem_name=name)
         
-        # Étape 2 : Si échec et Blueprint activé, bascule vers Phase 2
+        # Étape 2 : Si échec et Blueprint activé, bascule vers Phase 2 (décomposition)
         if not success and planner:
             print(f"  🔄 Échec direct -> Activation du Blueprint Planner (Phase 2)...")
             success, code = planner.prove_with_blueprint(decl, problem_name=name)
 
         if success:
             solved_count += 1
+            newly_solved.append(name)
             out_file = Path("problems") / f"minif2f_{name}.lean"
             safe_write_file(out_file, code + "\n")
-            print(f"  💾 Sauvegardé dans {out_file}")
+            print(f"  💾 Preuve formelle enregistrée dans {out_file}")
+        else:
+            failed_problems.append(name)
 
     print("\n" + "=" * 60)
-    print(f"🏆 RÉSULTAT FINAL BENCHMARK MINIF2F")
-    print(f"Problèmes testés  : {len(selected)}")
-    print(f"Problèmes résolus : {solved_count} / {len(selected)} ({solved_count / len(selected) * 100:.1f}%)")
+    print(f"🏆 RÉSULTAT DU BENCHMARK MINIF2F")
+    print(f"Problèmes évalués : {len(selected)}")
+    print(f"Problèmes résolus : {solved_count} / {max(1, len(selected))} ({solved_count / max(1, len(selected)) * 100:.1f}%)")
     print("=" * 60)
+
+    # Figer le rapport de la campagne dans reports/
+    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
+    report_path = Path("reports") / f"minif2f_campaign_{timestamp}.md"
+    report_content = [
+        f"# Rapport de Campagne MiniF2F — {timestamp}",
+        "",
+        f"- **Date** : `{timestamp}` UTC",
+        f"- **Modèle de base** : `{model}` (avec escalade reasoner)",
+        f"- **pass@k** : `{pass_k}`",
+        f"- **Mode Blueprint** : `{use_blueprint}`",
+        f"- **Problèmes évalués** : {len(selected)}",
+        f"- **Résolus** : {solved_count} ({solved_count / max(1, len(selected)) * 100:.1f}%)",
+        "",
+        "## Problèmes Résolus",
+        ""
+    ]
+    for s in newly_solved:
+        report_content.append(f"- ✅ `{s}`")
+    report_content.extend([
+        "",
+        "## Problèmes Non Résolus",
+        ""
+    ])
+    for f in failed_problems:
+        report_content.append(f"- ❌ `{f}`")
+
+    safe_write_file(report_path, "\n".join(report_content) + "\n")
+    print(f"📄 Rapport de campagne figé dans {report_path}")
+
+    # Déclencher une sauvegarde automatique de la base
+    db.backup()
 
 def main():
     parser = argparse.ArgumentParser(description="MiniF2F Benchmark Runner")
@@ -100,6 +166,8 @@ def main():
     parser.add_argument("--model", type=str, default="deepseek-chat", help="Modèle LLM cible")
     parser.add_argument("--no-blueprint", action="store_true", help="Désactiver le repli sur le Blueprint Planner")
     parser.add_argument("--name", type=str, default=None, help="Tester un problème spécifique par son nom")
+    parser.add_argument("--pass-k", type=int, default=1, help="Nombre de générations parallèles (default: 1)")
+    parser.add_argument("--skip-solved", action="store_true", help="Ignorer les problèmes déjà résolus")
     args = parser.parse_args()
 
     run_benchmark(
@@ -107,7 +175,9 @@ def main():
         attempts=args.attempts,
         model=args.model,
         use_blueprint=not args.no_blueprint,
-        name_filter=args.name
+        name_filter=args.name,
+        pass_k=args.pass_k,
+        skip_solved=args.skip_solved
     )
 
 if __name__ == "__main__":
