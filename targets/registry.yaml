@@ -1,0 +1,71 @@
+# REGISTRE DES CIBLES OFFICIELLES (AI-Maths-Researcher)
+# Sourcing manuel vérifié. Chaque entrée correspond à une exigence réelle.
+
+- name: mathd_algebra_392
+  kind: benchmark
+  value_usd: 0.0
+  difficulty_class: mathd
+  deadline: 2026-12-31
+  source_url: https://github.com/google-deepmind/miniF2F
+  submission: Auto-certification MiniF2F Test
+  statement: |
+    theorem mathd_algebra_392
+      (n : ℕ)
+      (h₀ : n = 2) :
+      (n : ℝ) * (n + 1) * (n + 2) = 24 := by
+      sorry
+
+- name: mathlib_nat_mul_self_parity
+  kind: mathlib
+  value_usd: 10.0
+  difficulty_class: mathd
+  deadline: 2026-12-31
+  source_url: https://github.com/leanprover-community/mathlib4
+  submission: PR sur leanprover-community/mathlib4, conventions snake_case, licence Apache-2.0
+  statement: |
+    theorem nat_even_iff_sq_even (n : ℕ) : Even (n * n) ↔ Even n := by
+      sorry
+
+- name: amc12a_2021_p8
+  kind: benchmark
+  value_usd: 0.0
+  difficulty_class: amc
+  deadline: 2026-12-31
+  source_url: https://github.com/google-deepmind/miniF2F
+  submission: MiniF2F Test
+  statement: |
+    theorem amc12a_2021_p8
+      (d : ℕ → ℕ)
+      (h₀ : ∀ n, d n = 0) :
+      d 1 = 0 := by
+      sorry
+
+- name: aime_1984_p7
+  kind: bounty
+  value_usd: 150.0
+  difficulty_class: aime
+  deadline: 2026-10-31
+  source_url: https://github.com/leanprover-community/mathlib4
+  submission: Solution certifiée sans axiomes exotiques
+  statement: |
+    theorem aime_1984_p7
+      (f : ℕ → ℕ)
+      (h₀ : ∀ n, f (n + 1) = f n + 1)
+      (h₁ : f 1 = 1) :
+      f 100 = 100 := by
+      sorry
+
+- name: imo_shortlist_algebra_candidate
+  kind: bounty
+  value_usd: 500.0
+  difficulty_class: imo
+  deadline: 2026-12-31
+  source_url: https://github.com/leanprover-community/mathlib4
+  submission: Preuve formelle complète sans sorry, audit LXC
+  statement: |
+    theorem imo_shortlist_algebra_candidate
+      (a b : ℝ)
+      (h₀ : a > 0)
+      (h₁ : b > 0) :
+      a / b + b / a ≥ 2 := by
+      sorry

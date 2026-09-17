@@ -141,14 +141,14 @@ Format your answer as:
             return True, ""
         return False, "\n".join(resp.error_texts)
 
-    def prove_with_blueprint(self, theorem_decl: str, problem_name: str = "Candidate") -> Tuple[bool, str]:
+    def prove_with_blueprint(
+        self,
+        theorem_decl: str,
+        problem_name: str = "Candidate",
+        external_repl: Optional[Any] = None
+    ) -> Tuple[bool, str]:
         """
-        Executes the full Blueprint workflow:
-        1. Create blueprint.
-        2. Validate skeleton in REPL.
-        3. Solve each lemma sequentially via ProofSearchEngine.
-        4. Solve the main theorem using the proven lemmas.
-        5. Verify final code without sorry on prod LXC.
+        Decomposes theorem into lemmas, proves them sequentially, and reconstructs full proof.
         """
         print(f"\n🗺️  [Blueprint] Élaboration du plan pour '{problem_name}'...")
         blueprint = self.create_blueprint(theorem_decl, problem_name)
@@ -161,7 +161,7 @@ Format your answer as:
         for lem in blueprint.lemmas:
             print(f"    - {lem.name} : {lem.declaration[:70]}...")
 
-        with LeanREPL() as repl:
+        def _execute_blueprint(repl: Any) -> Tuple[bool, str]:
             # Step 1: Verify skeleton compiles in REPL
             print("  ⚡ Vérification du squelette en mémoire REPL...")
             skel_ok, skel_err = self.verify_skeleton(blueprint.raw_skeleton, repl)
@@ -232,3 +232,9 @@ Format your answer as:
             else:
                 print(f"  ❌ Échec de la preuve finale du théorème principal.")
                 return False, ""
+
+        if external_repl is not None:
+            return _execute_blueprint(external_repl)
+        else:
+            with LeanREPL() as repl:
+                return _execute_blueprint(repl)

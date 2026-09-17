@@ -7,12 +7,28 @@ Stores persistent DB in /tmp/ai_maths_data/attempts.db to ensure full POSIX ACID
 import sqlite3
 import datetime
 import json
+import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-DB_PATH = Path("data/attempts.db")
-BACKUP_DIR = Path("data/backups")
+DB_PATH = (Path(__file__).resolve().parent.parent / "data" / "attempts.db").resolve()
+BACKUP_DIR = (Path(__file__).resolve().parent.parent / "data" / "backups").resolve()
 PERSISTENT_STORE = Path("/var/tmp/ai_maths_data/attempts.db")
+
+def classify_problem(name: str) -> str:
+    n = name.lower()
+    if "mathd" in n:
+        return "mathd"
+    elif "amc" in n:
+        return "amc"
+    elif "aime" in n:
+        return "aime"
+    elif "imo" in n or "imoshortlist" in n:
+        return "imo"
+    elif any(k in n for k in ["algebra", "numbertheory", "induction"]):
+        return "olympiad_other"
+    else:
+        return "other"
 
 def init_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
     PERSISTENT_STORE.parent.mkdir(parents=True, exist_ok=True)
@@ -27,8 +43,14 @@ def init_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
         except Exception:
             pass
 
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=10000;")
+    except Exception:
+        pass
+
     with conn:
         conn.execute("""
         CREATE TABLE IF NOT EXISTS attempts (
@@ -45,15 +67,30 @@ def init_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
             duration_ms REAL,
             prompt_tokens INTEGER DEFAULT 0,
             completion_tokens INTEGER DEFAULT 0,
-            cost_usd REAL DEFAULT 0.0
+            cost_usd REAL DEFAULT 0.0,
+            difficulty_class TEXT DEFAULT 'unknown'
         );
         """)
         conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_attempts_problem ON attempts(problem_name);
         """)
+
+        # Migration: ajouter difficulty_class si absente et backfill automatique
+        cols = [col[1] for col in conn.execute("PRAGMA table_info(attempts)").fetchall()]
+        if "difficulty_class" not in cols:
+            conn.execute("ALTER TABLE attempts ADD COLUMN difficulty_class TEXT DEFAULT 'unknown';")
+        
+        # Backfill des entrées 'unknown' ou nulles
+        rows_to_backfill = conn.execute("SELECT id, problem_name FROM attempts WHERE difficulty_class IS NULL OR difficulty_class = 'unknown'").fetchall()
+        for r in rows_to_backfill:
+            cls = classify_problem(r["problem_name"])
+            conn.execute("UPDATE attempts SET difficulty_class = ? WHERE id = ?", (cls, r["id"]))
+
     return conn
 
 class AttemptsDB:
+    _lock = threading.Lock()
+
     def __init__(self, db_path: Path = DB_PATH):
         self.db_path = db_path
         self.conn = init_db(db_path)
@@ -72,43 +109,47 @@ class AttemptsDB:
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         cost_usd: float = 0.0,
+        difficulty_class: Optional[str] = None
     ) -> int:
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with self.conn:
-            cursor = self.conn.execute(
-                """
-                INSERT INTO attempts (
-                    timestamp, problem_name, iteration, model, prompt, candidate_code,
-                    success, compiler_errors, unsolved_goals, duration_ms,
-                    prompt_tokens, completion_tokens, cost_usd
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    now, problem_name, iteration, model, prompt, candidate_code,
-                    1 if success else 0, compiler_errors, unsolved_goals, duration_ms,
-                    prompt_tokens, completion_tokens, cost_usd
+        diff_class = difficulty_class or classify_problem(problem_name)
+        with self._lock:
+            with self.conn:
+                cursor = self.conn.execute(
+                    """
+                    INSERT INTO attempts (
+                        timestamp, problem_name, iteration, model, prompt, candidate_code,
+                        success, compiler_errors, unsolved_goals, duration_ms,
+                        prompt_tokens, completion_tokens, cost_usd, difficulty_class
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        now, problem_name, iteration, model, prompt, candidate_code,
+                        1 if success else 0, compiler_errors, unsolved_goals, duration_ms,
+                        prompt_tokens, completion_tokens, cost_usd, diff_class
+                    )
                 )
-            )
-            return cursor.lastrowid
+                return cursor.lastrowid
 
     def backup(self) -> Path:
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_file = BACKUP_DIR / f"attempts_{timestamp}.sql"
-        latest_file = BACKUP_DIR / "attempts_latest.sql"
-        try:
-            dump = "\n".join(self.conn.iterdump())
-            backup_file.write_text(dump, encoding="utf-8")
-            latest_file.write_text(dump, encoding="utf-8")
-            print(f"💾 Sauvegarde SQLite créée : {backup_file}")
-            return backup_file
-        except Exception as e:
-            # Fallback to /var/tmp if permissions fail
-            alt_backup = PERSISTENT_STORE.parent / f"attempts_{timestamp}.sql"
-            dump = "\n".join(self.conn.iterdump())
-            alt_backup.write_text(dump, encoding="utf-8")
-            print(f"💾 Sauvegarde SQLite alternative créée : {alt_backup} (erreur: {e})")
-            return alt_backup
+        with self._lock:
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = BACKUP_DIR / f"attempts_{timestamp}.sql"
+            latest_file = BACKUP_DIR / "attempts_latest.sql"
+            try:
+                dump = "\n".join(self.conn.iterdump())
+                backup_file.write_text(dump, encoding="utf-8")
+                latest_file.write_text(dump, encoding="utf-8")
+                print(f"💾 Sauvegarde SQLite créée : {backup_file}")
+                return backup_file
+            except Exception as e:
+                # Fallback to /var/tmp if permissions fail
+                alt_backup = PERSISTENT_STORE.parent / f"attempts_{timestamp}.sql"
+                dump = "\n".join(self.conn.iterdump())
+                alt_backup.write_text(dump, encoding="utf-8")
+                print(f"💾 Sauvegarde SQLite alternative créée : {alt_backup} (erreur: {e})")
+                return alt_backup
 
     def get_summary(self) -> Dict[str, Any]:
         with self.conn:
@@ -168,3 +209,35 @@ class AttemptsDB:
                 "avg_duration_ms": avg_duration,
                 "models": models
             }
+
+    def get_success_rates_by_class(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Calculates p_success per difficulty class (mathd, amc, aime, imo, olympiad_other)
+        based on distinct problem resolutions.
+        """
+        with self.conn:
+            rows = self.conn.execute("""
+                SELECT difficulty_class,
+                       COUNT(DISTINCT problem_name) AS attempted,
+                       SUM(solved) AS solved
+                FROM (
+                    SELECT problem_name, difficulty_class, MAX(success) AS solved
+                    FROM attempts
+                    WHERE problem_name NOT LIKE '%_step%'
+                    GROUP BY problem_name
+                )
+                GROUP BY difficulty_class
+                ORDER BY attempted DESC;
+            """).fetchall()
+
+            res = {}
+            for r in rows:
+                attempted = r["attempted"]
+                solved = r["solved"] or 0
+                p_succ = (solved / attempted) if attempted > 0 else 0.0
+                res[r["difficulty_class"]] = {
+                    "attempted": attempted,
+                    "solved": solved,
+                    "p_success": p_succ
+                }
+            return res

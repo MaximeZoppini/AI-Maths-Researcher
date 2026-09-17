@@ -276,3 +276,74 @@ class LeanREPL:
             payload["env"] = self.base_env
 
         return self.send_request(payload, timeout_sec=timeout_sec)
+
+import contextlib
+
+class REPLPool:
+    """Pool of persistent LeanREPL instances under lock for multi-threaded proof search."""
+    def __init__(
+        self,
+        size: int = 2,
+        host: str = "100.90.108.89",
+        container_id: str = "200",
+        full_mathlib: bool = False
+    ):
+        self.size = size
+        self.host = host
+        self.container_id = container_id
+        self.full_mathlib = full_mathlib
+        self._pool: queue.Queue = queue.Queue(maxsize=size)
+        self._repls: List[LeanREPL] = []
+        self._lock = threading.Lock()
+        self._initialized = False
+
+    def start(self):
+        with self._lock:
+            if self._initialized:
+                return
+            print(f"🚀 Initialisation du pool REPL ({self.size} workers persistent SSH)...")
+            for i in range(self.size):
+                print(f"  → Démarrage REPL #{i+1}...")
+                repl = LeanREPL(
+                    host=self.host,
+                    container_id=self.container_id,
+                    full_mathlib=self.full_mathlib
+                )
+                repl.start()
+                self._repls.append(repl)
+                self._pool.put(repl)
+            self._initialized = True
+            print(f"✅ Pool REPL opérationnel ({self.size} instances).")
+
+    @contextlib.contextmanager
+    def acquire(self, timeout: Optional[float] = None):
+        if not self._initialized:
+            self.start()
+        repl = self._pool.get(timeout=timeout)
+        try:
+            yield repl
+        finally:
+            self._pool.put(repl)
+
+    def check_code(self, code: str, timeout_sec: Optional[float] = None) -> REPLResponse:
+        """Drop-in replacement for LeanREPL.check_code using pool workers."""
+        with self.acquire() as repl:
+            return repl.check_code(code, timeout_sec=timeout_sec)
+
+    def close(self):
+        with self._lock:
+            for repl in self._repls:
+                try:
+                    repl.close()
+                except Exception:
+                    pass
+            self._repls.clear()
+            self._initialized = False
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+

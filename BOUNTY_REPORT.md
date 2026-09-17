@@ -1,16 +1,17 @@
 # 🏆 AI-Maths-Researcher — Rapport Officiel de Certification & Bounties
 
-> **Généré le** : `2026-09-17 14:10:41 UTC`  
+> **Généré le** : `2026-09-17 14:31:34 UTC`  
 > **Infra de Vérification** : LXC Container 200 (Proxmox 100.90.108.89)  
 > **Lean 4 / Mathlib** : `v4.34.0` | **Axiomes Admis** : `[propext, Classical.choice, Quot.sound]` (Strict Zero-Sorry)
 
 ---
 
-## 1. Synthèse Exécutive
+## 1. Métrique Officielle & Synthèse Exécutive
 
 | Métrique | Valeur |
 | :--- | :--- |
-| **Problèmes Uniques Résolus** | **21 / 38** (55.3%) |
+| 🎯 **Métrique Officielle MiniF2F Test** | **18 / 35** (51.4%) |
+| **Problèmes Uniques Résolus (Total)** | **21 / 38** (55.3%) |
 | **Sous-Lemmes Décomposés & Résolus** | **9 / 19** |
 | **Nombre Total de Tentatives** | **258** |
 | **Temps Moyen par Tentative (REPL)** | **805.6 ms** |
@@ -18,7 +19,20 @@
 
 ---
 
-## 2. Répartition par Modèle
+## 2. Taux de Succès par Classe de Difficulté
+
+| Classe | Tentés | Résolus | p_success |
+| :--- | :--- | :--- | :--- |
+| `mathd` | 16 | 13 | **81.2%** |
+| `olympiad_other` | 8 | 3 | **37.5%** |
+| `imo` | 6 | 0 | **0.0%** |
+| `amc` | 4 | 1 | **25.0%** |
+| `other` | 3 | 3 | **100.0%** |
+| `aime` | 1 | 1 | **100.0%** |
+
+---
+
+## 3. Répartition par Modèle
 
 | Modèle | Essais | Succès | Taux | Latence Moy. | Coût Total |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -28,7 +42,7 @@
 
 ---
 
-## 3. Registre des Preuves Formelles Certifiées ('Axiom-Clean')
+## 4. Registre des Preuves Formelles Certifiées ('Axiom-Clean')
 
 ### 🎯 Théorème : `AutoNatCancel`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**

@@ -1,16 +1,19 @@
-"""
-MiniF2F Benchmark Runner for AI-Maths-Researcher.
-Evaluates autonomous proof search on the official Google DeepMind MiniF2F Lean 4 dataset.
-"""
-
 import urllib.request
 import re
 import argparse
 import sys
+import os
+import threading
+import concurrent.futures
+import datetime
 from pathlib import Path
 from typing import List, Tuple, Optional
 
-from agent.prover import ProofSearchEngine, ProverConfig
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from agent.prover import ProofSearchEngine, ProverConfig, get_deepseek_balance
+from agent.repl_client import LeanREPL, REPLPool
+from agent.planner import BlueprintPlanner
 from agent.db import AttemptsDB
 
 MINIF2F_URL = "https://raw.githubusercontent.com/google-deepmind/miniF2F/main/MiniF2F/Test.lean"
@@ -29,13 +32,11 @@ def parse_theorems(content: str) -> List[Tuple[str, str]]:
     """
     Parses theorem declarations (name, full_declaration_statement).
     """
-    # Match theorem blocks ending with := by sorry
     pattern = r"(theorem\s+([a-zA-Z0-9_]+)[\s\S]*?:=\s*by\s*\n\s*sorry)"
     matches = re.findall(pattern, content)
     
     results = []
     for full, name in matches:
-        # Extract statement up to ':='
         stmt_part = full.split(":=")[0].strip()
         results.append((name, stmt_part))
     return results
@@ -47,10 +48,6 @@ def safe_write_file(path: Path, content: str):
         import subprocess
         subprocess.run(["sh", "-c", f"cat > '{path}'"], input=content, text=True, check=True)
 
-from agent.planner import BlueprintPlanner
-
-import datetime
-
 def run_benchmark(
     limit: int = 50,
     attempts: int = 3,
@@ -58,8 +55,20 @@ def run_benchmark(
     use_blueprint: bool = True,
     name_filter: Optional[str] = None,
     pass_k: int = 1,
-    skip_solved: bool = False
+    skip_solved: bool = False,
+    workers: int = 1,
+    min_balance: float = 0.50
 ):
+    # 0. Garde-fou Solde API initial
+    bal = get_deepseek_balance()
+    if bal is not None:
+        print(f"💳 Solde DeepSeek vérifié : ${bal:.2f} USD")
+        if bal < min_balance:
+            print(f"🛑 Solde insuffisant (${bal:.2f} < seuil minimal ${min_balance:.2f}). Campagne annulée.")
+            return
+    else:
+        print("ℹ️ Clé DeepSeek non configurée ou solde non consultable.")
+
     content = fetch_minif2f_test()
     theorems = parse_theorems(content)
     
@@ -82,63 +91,117 @@ def run_benchmark(
                 filtered.append((name, decl))
         selected = filtered
 
-    print("\n" + "=" * 60)
-    print(f"🏁 Démarrage du Benchmark MiniF2F Lean 4 ({len(selected)} problèmes)")
-    print(f"Modèle : {model} | Essais max : {attempts} | pass@{pass_k} | Blueprint : {use_blueprint} | Escalade : Activée")
-    print("=" * 60)
+    total_problems = len(selected)
+    print("\n" + "=" * 65)
+    print(f"🏁 Démarrage du Benchmark MiniF2F Lean 4 ({total_problems} problèmes)")
+    print(f"Modèle : {model} | Essais max : {attempts} | pass@{pass_k} | Workers : {workers}")
+    print(f"Blueprint : {use_blueprint} | Escalade Reasoner : Activée | Seuil Budget : ${min_balance:.2f}")
+    print("=" * 65)
+
+    if total_problems == 0:
+        print("Aucun problème à exécuter.")
+        return
 
     config = ProverConfig(
         max_attempts=attempts,
         model=model,
         pass_k=pass_k,
         enable_escalation=True,
-        timeout_per_attempt_sec=25
+        timeout_per_attempt_sec=25,
+        min_balance_threshold_usd=min_balance,
+        early_abort=True
     )
     engine = ProofSearchEngine(config=config)
     planner = BlueprintPlanner(config=config) if use_blueprint else None
     db = AttemptsDB()
 
+    solved_lock = threading.Lock()
     solved_count = 0
     newly_solved = []
     failed_problems = []
+    completed_count = 0
 
-    for idx, (name, decl) in enumerate(selected, 1):
-        print(f"\n[{idx}/{len(selected)}] 🎯 Problème : {name}")
+    # Configuration du pool REPL pour multi-workers
+    repl_pool: Optional[REPLPool] = None
+    if workers > 1:
+        pool_size = min(3, max(2, workers // 2))
+        repl_pool = REPLPool(size=pool_size)
+        repl_pool.start()
+
+    def process_item(item_info: Tuple[int, str, str]) -> Tuple[bool, str, str]:
+        nonlocal solved_count, completed_count
+        idx, name, decl = item_info
+
+        # Gate STOP
+        stop_file = (Path(__file__).resolve().parent.parent / "STOP").resolve()
+        if stop_file.exists() or Path("STOP").exists():
+            return False, name, "STOP"
+
+        # Gate Solde
+        current_bal = get_deepseek_balance()
+        if current_bal is not None and current_bal < min_balance:
+            return False, name, "LOW_BALANCE"
+
+        repl_target = repl_pool if repl_pool else None
+
+        print(f"\n[{idx}/{total_problems}] 🎯 Lancement : {name}")
         # Étape 1 : Stratégie A (Preuve directe avec escalade raisonnée et pass@k)
-        success, code = engine.prove_theorem(decl, problem_name=name)
+        success, code = engine.prove_theorem(decl, problem_name=name, external_repl=repl_target)
         
-        # Étape 2 : Si échec et Blueprint activé, bascule vers Phase 2 (décomposition)
+        # Étape 2 : Si échec et Blueprint activé, bascule vers décomposition
         if not success and planner:
-            print(f"  🔄 Échec direct -> Activation du Blueprint Planner (Phase 2)...")
-            success, code = planner.prove_with_blueprint(decl, problem_name=name)
+            print(f"  🔄 Échec direct -> Activation du Blueprint Planner pour {name}...")
+            success, code = planner.prove_with_blueprint(decl, problem_name=name, external_repl=repl_target)
 
-        if success:
-            solved_count += 1
-            newly_solved.append(name)
-            out_file = Path("problems") / f"minif2f_{name}.lean"
-            safe_write_file(out_file, code + "\n")
-            print(f"  💾 Preuve formelle enregistrée dans {out_file}")
+        with solved_lock:
+            completed_count += 1
+            if success:
+                solved_count += 1
+                newly_solved.append(name)
+                out_file = Path("problems") / f"minif2f_{name}.lean"
+                safe_write_file(out_file, code + "\n")
+                print(f"  💾 [{completed_count}/{total_problems}] Preuve enregistrée dans {out_file}")
+            else:
+                failed_problems.append(name)
+                print(f"  ❌ [{completed_count}/{total_problems}] Non résolu : {name}")
+
+        return success, name, code
+
+    try:
+        items = [(idx, name, decl) for idx, (name, decl) in enumerate(selected, 1)]
+        if workers > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                list(executor.map(process_item, items))
         else:
-            failed_problems.append(name)
+            for item in items:
+                process_item(item)
+    finally:
+        if repl_pool:
+            repl_pool.close()
 
-    print("\n" + "=" * 60)
-    print(f"🏆 RÉSULTAT DU BENCHMARK MINIF2F")
-    print(f"Problèmes évalués : {len(selected)}")
-    print(f"Problèmes résolus : {solved_count} / {max(1, len(selected))} ({solved_count / max(1, len(selected)) * 100:.1f}%)")
-    print("=" * 60)
+    rate_pct = (solved_count / max(1, total_problems)) * 100
+    print("\n" + "=" * 65)
+    print("🏆 RÉSULTAT DE LA CAMPAGNE MINIF2F")
+    print(f"🎯 Métrique Officielle MiniF2F Test : {solved_count} / {total_problems} ({rate_pct:.1f}%)")
+    print(f"   (Évaluation sur set figé de problèmes distincts)")
+    print("=" * 65)
 
     # Figer le rapport de la campagne dans reports/
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
-    report_path = Path("reports") / f"minif2f_campaign_{timestamp}.md"
+    reports_dir = Path("reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_path = reports_dir / f"minif2f_campaign_{timestamp}.md"
     report_content = [
-        f"# Rapport de Campagne MiniF2F — {timestamp}",
+        f"# Rapport Officiel de Campagne MiniF2F — {timestamp}",
         "",
         f"- **Date** : `{timestamp}` UTC",
+        f"- **Métrique Officielle** : **{solved_count} / {total_problems} ({rate_pct:.1f}%)**",
         f"- **Modèle de base** : `{model}` (avec escalade reasoner)",
+        f"- **Workers parallèles** : `{workers}`",
         f"- **pass@k** : `{pass_k}`",
         f"- **Mode Blueprint** : `{use_blueprint}`",
-        f"- **Problèmes évalués** : {len(selected)}",
-        f"- **Résolus** : {solved_count} ({solved_count / max(1, len(selected)) * 100:.1f}%)",
+        f"- **Problèmes évalués** : {total_problems}",
+        f"- **Résolus certifiés** : {solved_count}",
         "",
         "## Problèmes Résolus",
         ""
@@ -168,6 +231,8 @@ def main():
     parser.add_argument("--name", type=str, default=None, help="Tester un problème spécifique par son nom")
     parser.add_argument("--pass-k", type=int, default=1, help="Nombre de générations parallèles (default: 1)")
     parser.add_argument("--skip-solved", action="store_true", help="Ignorer les problèmes déjà résolus")
+    parser.add_argument("--workers", type=int, default=1, help="Nombre de workers parallèles (default: 1)")
+    parser.add_argument("--min-balance", type=float, default=0.50, help="Solde minimal DeepSeek USD requis (default: 0.50)")
     args = parser.parse_args()
 
     run_benchmark(
@@ -177,7 +242,9 @@ def main():
         use_blueprint=not args.no_blueprint,
         name_filter=args.name,
         pass_k=args.pass_k,
-        skip_solved=args.skip_solved
+        skip_solved=args.skip_solved,
+        workers=args.workers,
+        min_balance=args.min_balance
     )
 
 if __name__ == "__main__":

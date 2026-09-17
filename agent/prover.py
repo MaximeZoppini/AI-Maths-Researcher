@@ -28,6 +28,25 @@ def load_dotenv():
                 k, v = line.split("=", 1)
                 os.environ.setdefault(k.strip(), v.strip().strip("'\""))
 
+def get_deepseek_balance(api_key: Optional[str] = None) -> Optional[float]:
+    """Queries DeepSeek balance API to protect budget."""
+    key = api_key or os.environ.get("DEEPSEEK_API_KEY")
+    if not key:
+        return None
+    try:
+        req = urllib.request.Request(
+            "https://api.deepseek.com/user/balance",
+            headers={"Authorization": f"Bearer {key}", "User-Agent": "AI-Maths-Researcher/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            infos = data.get("balance_infos", [])
+            if infos:
+                return float(infos[0].get("total_balance", 0.0))
+    except Exception:
+        pass
+    return None
+
 load_dotenv()
 
 @dataclass
@@ -40,6 +59,8 @@ class ProverConfig:
     timeout_per_attempt_sec: int = 25
     pass_k: int = 1
     enable_escalation: bool = True
+    min_balance_threshold_usd: float = 0.50
+    early_abort: bool = True
 
 class LLMProvider:
     """Dispatches requests to DeepSeek, Gemini, or OpenAI based on available keys."""
@@ -113,10 +134,14 @@ class LLMProvider:
             usage = data.get("usage", {})
             p_tok = usage.get("prompt_tokens", 0)
             c_tok = usage.get("completion_tokens", 0)
+            cache_hit = usage.get("prompt_cache_hit_tokens", 0)
+            cache_miss = usage.get("prompt_cache_miss_tokens", max(0, p_tok - cache_hit))
+
+            # Facturation exacte avec réduction cache-hit DeepSeek
             if is_reasoner:
-                cost = (p_tok * 0.00000055) + (c_tok * 0.00000219)
+                cost = (cache_hit * 0.00000014) + (cache_miss * 0.00000055) + (c_tok * 0.00000219)
             else:
-                cost = (p_tok * 0.00000014) + (c_tok * 0.00000028)
+                cost = (cache_hit * 0.00000007) + (cache_miss * 0.00000014) + (c_tok * 0.00000028)
             return text, p_tok, c_tok, cost
 
     def _call_gemini(self, prompt: str, temperature: float, model: str = "gemini-2.5-flash") -> Tuple[str, int, int, float]:
@@ -261,7 +286,8 @@ class ProofSearchEngine:
         theorem_decl: str,
         problem_name: str = "Candidate",
         context_code: str = "",
-        external_repl: Optional[LeanREPL] = None
+        external_repl: Optional[LeanREPL] = None,
+        difficulty_class: Optional[str] = None
     ) -> Tuple[bool, str]:
         print(f"\n🧠 Lancement de la recherche de preuve pour '{problem_name}'...")
         print(f"Modèle actif : {self.llm.model}")
@@ -279,17 +305,46 @@ class ProofSearchEngine:
             seen_premise_names = {p.name for p in premises}
 
             for iteration in range(1, self.config.max_attempts + 1):
+                # 0. Kill-switch STOP
+                stop_file = (Path(__file__).resolve().parent.parent / "STOP").resolve()
+                if stop_file.exists() or Path("STOP").exists():
+                    print("🛑 Kill-switch STOP détecté. Arrêt immédiat de la recherche.")
+                    break
+
+                # 1. Garde-fou Solde API DeepSeek
+                if self.config.min_balance_threshold_usd > 0 and self.llm.deepseek_key:
+                    if iteration == 1 or iteration % 2 == 0:
+                        bal = get_deepseek_balance(self.llm.deepseek_key)
+                        if bal is not None and bal < self.config.min_balance_threshold_usd:
+                            print(f"🛑 Solde DeepSeek insuffisant (${bal:.2f} < seuil ${self.config.min_balance_threshold_usd:.2f}). Arrêt de sécurité.")
+                            break
+
+                # 2. Plafond budget par problème
                 if total_cost >= self.config.budget_usd:
                     print(f"⚠️ Budget limite de ${self.config.budget_usd:.2f} atteint. Arrêt.")
                     break
 
-                # 1. Escalade dynamique de modèle : tentatives 1-2 chat, tentatives 3+ reasoner
+                # 3. Abandon précoce (stagnation du but ou erreur répétée)
+                if self.config.early_abort and len(history) >= 2:
+                    last_goals = history[-1].get("goals", "").strip()
+                    prev_goals = history[-2].get("goals", "").strip()
+                    if last_goals and last_goals == prev_goals:
+                        print(f"🛑 Abandon précoce : Stagnation du but REPL détectée entre itérations {iteration-2} et {iteration-1}. Arrêt.")
+                        break
+
+                    last_err = history[-1].get("errors", "").strip()
+                    prev_err = history[-2].get("errors", "").strip()
+                    if last_err and len(last_err) > 15 and last_err == prev_err:
+                        print(f"🛑 Abandon précoce : Erreur de compilation identique répétée. Arrêt.")
+                        break
+
+                # 4. Escalade dynamique de modèle : tentatives 1-2 chat, tentatives 3+ reasoner
                 if self.config.enable_escalation and iteration >= 3 and self.llm.deepseek_key:
                     active_model = "deepseek-reasoner"
                 else:
                     active_model = self.config.model
 
-                # 2. Retrieval dynamique sur but REPL et identifiants inconnus
+                # 5. Retrieval dynamique sur but REPL et identifiants inconnus
                 if history:
                     last_h = history[-1]
                     err = last_h.get("errors", "")
@@ -316,7 +371,7 @@ class ProofSearchEngine:
                 prompt = self.build_prompt(theorem_decl, premises, history, context_code=context_code)
                 print(f"\n[Tentative {iteration}/{self.config.max_attempts}] Génération ({active_model}, temp={current_temp:.2f})...")
 
-                # 3. Tir parallèle pass@k si configuré sur la 1ère tentative
+                # 6. Tir parallèle pass@k si configuré sur la 1ère tentative
                 candidates_to_test = []
                 if self.config.pass_k > 1 and iteration == 1:
                     print(f"  🚀 Tir parallèle pass@{self.config.pass_k} à températures variées...")
@@ -388,7 +443,8 @@ class ProofSearchEngine:
                             duration_ms=repl_resp.duration_ms,
                             prompt_tokens=p_tok,
                             completion_tokens=c_tok,
-                            cost_usd=cost
+                            cost_usd=cost,
+                            difficulty_class=difficulty_class
                         )
 
                         if prod_res.success:
@@ -417,7 +473,8 @@ class ProofSearchEngine:
                             duration_ms=repl_resp.duration_ms,
                             prompt_tokens=p_tok,
                             completion_tokens=c_tok,
-                            cost_usd=cost
+                            cost_usd=cost,
+                            difficulty_class=difficulty_class
                         )
                         num_errs = len(repl_resp.error_texts) + len(repl_resp.goals)
                         if num_errs < min_errors:
