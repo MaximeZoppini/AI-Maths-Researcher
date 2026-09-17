@@ -174,8 +174,16 @@ class ProofSearchEngine:
         if "theorem" not in code and "lemma" not in code:
             code = f"{theorem_decl} := {code}"
 
+        # Normalize umbrella 'import Mathlib' to fast targeted imports
+        code = re.sub(
+            r"^\s*import\s+Mathlib\s*$",
+            "import Mathlib.Tactic\nimport Mathlib.Data.Real.Basic\nimport Mathlib.Algebra.Ring.Parity",
+            code,
+            flags=re.MULTILINE
+        )
+
         if not code.startswith("import"):
-            code = "import Mathlib.Tactic\nimport Mathlib.Algebra.Ring.Parity\n\nset_option linter.style.header false\n\n" + code
+            code = "import Mathlib.Tactic\nimport Mathlib.Data.Real.Basic\nimport Mathlib.Algebra.Ring.Parity\n\nset_option linter.style.header false\n\n" + code
 
         return code
 
