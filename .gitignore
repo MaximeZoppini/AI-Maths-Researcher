@@ -1,6 +1,20 @@
+# Lean 4 Lake artifacts
 .lake/
 build/
 *.olean
 *.ilean
 *.c
 *.o
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+*.egg-info/
+
+# OS / Editor
+.DS_Store
+.vscode/
