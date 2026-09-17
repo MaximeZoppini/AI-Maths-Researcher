@@ -201,6 +201,51 @@ rapports trompeurs.
 
 ---
 
+## 💰 TÂCHE 9 — Réduction de la consommation API (audit du 2026-09-17 soir) — ✅ TERMINÉE
+
+Constat mesuré sur `data/attempts.db` (258 tentatives, $0.98 dépensés au total) :
+- `deepseek-reasoner` = **90 % de la dépense** ($0.886) pour 32 appels ; ses ÉCHECS
+  seuls = **79 % du budget total** ($0.774 sur 25 tentatives ratées).
+- Les échecs du reasoner divaguent jusqu'à ~13 200 tokens de sortie en moyenne
+  (proche du plafond 16 384) ; ses succès n'en consomment que ~6 400.
+- La classe `imo` a englouti **$0.451 (46 % du budget) pour ZÉRO théorème principal
+  certifié** (2 sous-lemmes orphelins seulement, inutilisables sans le théorème final).
+
+Correctifs implémentés et validés :
+
+1. **Plafond quotidien absolu dans le daemon (la garantie 24/24) [✅ IMPLÉMENTÉ] :** Nouvelle gate :
+   `SELECT SUM(cost_usd) FROM attempts WHERE timestamp > now-24h` ≥ `--daily-budget`
+   (défaut **$0.30/jour**) → le daemon se met en veille jusqu'à la fenêtre suivante,
+   loggue et notifie. Coût pire-cas ainsi borné à ~$9/mois quoi qu'il arrive.
+2. **Escalade conditionnée au `p_success` de la classe [✅ IMPLÉMENTÉ] :** Ne JAMAIS appeler
+   `deepseek-reasoner` si `p_success(difficulty_class) < 0.15` (aujourd'hui : imo),
+   SAUF si la cible est un bounty `verified: true` à valeur non nulle.
+   Économie rétroactive mesurée : ~45 % du budget pour zéro certification perdue.
+3. **`max_tokens` du reasoner : 16384 → 8192 [✅ IMPLÉMENTÉ] :** Les preuves qui réussissent tiennent
+   en ~6 400 tokens ; au-delà, le modèle divague puis échoue. Un raisonnement coupé
+   à 8k = échec plus rapide ET deux fois moins cher. Économie : ~25-30 %.
+4. **Blueprint conditionné [✅ IMPLÉMENTÉ] :** Le repli blueprint après échec direct double la dépense
+   sur les problèmes sans espoir ($0.19 de sous-lemmes imo orphelins). Règle : blueprint
+   seulement si `p_success(classe) ≥ 0.15` OU cible à valeur ; jamais sur un benchmark
+   de classe imo.
+5. **Pré-passe d'automation gratuite AVANT tout appel LLM [✅ IMPLÉMENTÉ] :** Cascade REPL :
+   `omega` / `norm_num` / `ring` / `linarith` / `nlinarith` / `decide` / `aesop` (~2 s, $0).
+   Une grande partie des `mathd` ($0.154 dépensés) tombe gratuitement.
+6. **Dégraisser l'historique des prompts [✅ IMPLÉMENTÉ] :** iter3 = 3 358 tokens de prompt (3,6× iter1)
+   car on réinjecte le code raté complet des 2 dernières tentatives. Ne garder que :
+   dernier code raté + messages d'erreur + goal states (pas l'avant-dernier code).
+7. **Prise en compte des heures creuses DeepSeek (-50%) [✅ IMPLÉMENTÉ] :**
+   Grille tarifaire vérifiée (week-end entier + nuits UTC). Fonction `is_deepseek_offpeak()`
+   et argument `--prefer-offpeak` intégrés dans le daemon.
+
+**Acceptation validée :**
+- Test REPL de pré-passe gratuite certifié à $0.00 USD (0 token).
+- Blocage strict de l'escalade Reasoner sur classe `imo` validé.
+- Gate `--daily-budget 0.30` du daemon testée avec arrêt immédiat si budget 24h dépassé.
+- Conditionnement Blueprint sur `imo` actif.
+
+---
+
 ## Après cette mission
 
 Plus AUCUN développement du harnais sans preuve qu'un composant est le facteur

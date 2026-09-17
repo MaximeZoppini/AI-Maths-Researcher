@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agent.prover import ProofSearchEngine, ProverConfig, get_deepseek_balance
 from agent.repl_client import LeanREPL, REPLPool
 from agent.planner import BlueprintPlanner
-from agent.db import AttemptsDB
+from agent.db import AttemptsDB, classify_problem
 
 MINIF2F_URL = "https://raw.githubusercontent.com/google-deepmind/miniF2F/main/MiniF2F/Test.lean"
 LOCAL_CACHE = Path(__file__).resolve().parent / "minif2f_test.lean"
@@ -192,14 +192,27 @@ def run_benchmark(
 
         repl_target = repl_pool if repl_pool else None
 
-        print(f"\n[{idx}/{total_problems}] 🎯 Lancement : {name}")
-        # Étape 1 : Stratégie A (Preuve directe avec escalade raisonnée et pass@k)
-        success, code = engine.prove_theorem(decl, problem_name=name, external_repl=repl_target)
-        
-        # Étape 2 : Si échec et Blueprint activé, bascule vers décomposition
-        if not success and planner:
+        diff_class = classify_problem(name)
+        print(f"\n[{idx}/{total_problems}] 🎯 Lancement : {name} (classe: {diff_class})")
+        # Étape 1 : Stratégie A (Preuve directe avec pré-passe gratuite, escalade conditionnée et pass@k)
+        success, code = engine.prove_theorem(
+            decl,
+            problem_name=name,
+            external_repl=repl_target,
+            difficulty_class=diff_class
+        )
+
+        # Étape 2 : Si échec et Blueprint activé, bascule vers décomposition conditionnée
+        cls_stats = db.get_success_rates_by_class().get(diff_class, {})
+        p_succ = cls_stats.get("p_success", 0.0) if cls_stats.get("attempted", 0) >= 3 else 0.20
+        # Règle Tâche 9 : Pas de blueprint si classe imo ou si p_success < 0.15
+        should_blueprint = planner and (diff_class != "imo") and (p_succ >= 0.15)
+
+        if not success and should_blueprint:
             print(f"  🔄 Échec direct -> Activation du Blueprint Planner pour {name}...")
             success, code = planner.prove_with_blueprint(decl, problem_name=name, external_repl=repl_target)
+        elif not success and planner and not should_blueprint:
+            print(f"  ℹ️ Repli Blueprint ignoré pour {name} (classe '{diff_class}', p_success {p_succ*100:.1f}% < 15%). Évite les sous-lemmes orphelins.")
 
         with solved_lock:
             completed_count += 1

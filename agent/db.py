@@ -241,3 +241,15 @@ class AttemptsDB:
                     "p_success": p_succ
                 }
             return res
+
+    def get_rolling_cost_usd(self, hours: int = 24) -> float:
+        """
+        Calculates total cost incurred within the rolling window of `hours` (default 24h).
+        """
+        cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)).isoformat()
+        with self.conn:
+            row = self.conn.execute(
+                "SELECT COALESCE(SUM(cost_usd), 0.0) FROM attempts WHERE timestamp > ?",
+                (cutoff,)
+            ).fetchone()
+            return float(row[0]) if row else 0.0

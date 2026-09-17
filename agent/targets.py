@@ -105,7 +105,8 @@ def config_for(target: Target, p_success: float) -> ProverConfig:
             enable_escalation=True,
             budget_usd=bounded_budget,
             timeout_per_attempt_sec=35,
-            early_abort=True
+            early_abort=True,
+            is_paid_bounty=(target.value_usd > 0)
         )
 
     else:

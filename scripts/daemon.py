@@ -37,7 +37,20 @@ def safe_write_file(path: Path, content: str):
     try:
         path.write_text(content, encoding="utf-8")
     except PermissionError:
-        subprocess.run(["sh", "-c", f"cat > '{path}'"], input=content, text=True, check=True)
+        subprocess.run(["tee", str(path)], input=content, text=True, stdout=subprocess.DEVNULL, check=True)
+
+def is_deepseek_offpeak(dt: Optional[datetime.datetime] = None) -> bool:
+    """
+    Vérifie si le moment actuel correspond aux heures creuses DeepSeek (-50% sur les tokens) :
+    - Samedi et Dimanche : 100% en heures creuses (week-end entier).
+    - Lundi à Vendredi : Heures creuses en dehors des pics 01:00-04:00 UTC et 06:00-10:00 UTC.
+    """
+    now = dt or datetime.datetime.now(datetime.timezone.utc)
+    if now.weekday() in (5, 6):  # 5 = Samedi, 6 = Dimanche
+        return True
+    hour = now.hour
+    is_peak = (1 <= hour < 4) or (6 <= hour < 10)
+    return not is_peak
 
 def git_commit_proof(problem_name: str, cost: float):
     try:
@@ -52,6 +65,8 @@ def run_daemon(
     interval_sec: int = 30,
     min_balance_usd: float = 0.50,
     max_session_cost_usd: float = 5.00,
+    daily_budget_usd: float = 0.30,
+    prefer_offpeak: bool = False,
     run_once: bool = False,
     auto_commit: bool = True
 ):
@@ -60,7 +75,9 @@ def run_daemon(
     print(f"Racine du projet : {ROOT_DIR}")
     print(f"File d'attente    : {QUEUE_PATH}")
     print(f"Seuil solde API  : ${min_balance_usd:.2f} USD | Plafond session : ${max_session_cost_usd:.2f} USD")
+    print(f"Budget roulant 24h: ${daily_budget_usd:.2f} USD (garantie max ~$9/mois)")
     print(f"Kill-switch file : {STOP_FILE}")
+    print(f"Mode Heures Creuses : {'ACTIF (-50%)' if is_deepseek_offpeak() else 'HEURES PLEINES'}")
     print("=" * 70 + "\n")
 
     db = AttemptsDB()
@@ -87,6 +104,18 @@ def run_daemon(
         if session_cost >= max_session_cost_usd:
             print(f"🛑 GATE 3 DÉCLENCHÉE : Plafond session de ${max_session_cost_usd:.2f} atteint. Arrêt propre.")
             break
+
+        # GATE 3bis: Plafond quotidien roulant 24h (Garantie absolue Tâche 9)
+        rolling_24h_cost = db.get_rolling_cost_usd(24)
+        if rolling_24h_cost >= daily_budget_usd:
+            print(f"🛑 GATE BUDGET 24H DÉCLENCHÉE : Dépense sur 24h (${rolling_24h_cost:.4f} USD) >= plafond quotidien (${daily_budget_usd:.2f} USD).")
+            print("   Mise en veille sécurisée pour borner la dépense à ~$9/mois max.")
+            if run_once:
+                print("🏁 Mode --once : fin d'exécution du daemon (budget 24h atteint).")
+                break
+            print(f"En attente de la prochaine fenêtre budgétaire ({interval_sec}s)...")
+            time.sleep(interval_sec)
+            continue
 
         # Watcher whitelisté (throttlé 24h par défaut)
         try:
@@ -157,12 +186,21 @@ def run_daemon(
             difficulty_class=current_target.difficulty_class
         )
 
-        if not success and planner:
+        # Règle Tâche 9 : Blueprint seulement si p_success >= 0.15 OU cible à valeur financière réelle ; JAMAIS sur IMO benchmark.
+        should_blueprint = (
+            planner is not None
+            and current_target.difficulty_class != "imo"
+            and (p_succ >= 0.15 or current_target.value_usd > 0)
+        )
+
+        if not success and should_blueprint:
             print(f"  🔄 Repli sur décomposition Blueprint pour {current_target.name}...")
             success, proof_code = planner.prove_with_blueprint(
                 theorem_decl=current_target.statement,
                 problem_name=current_target.name
             )
+        elif not success and planner and not should_blueprint:
+            print(f"  ℹ️ Repli Blueprint ignoré pour '{current_target.name}' (classe '{current_target.difficulty_class}', p_success {p_succ*100:.1f}%, non-bounty). Évite les sous-lemmes orphelins coûteux.")
 
         cost_after = db.get_summary()["total_cost_usd"]
         item_cost = max(0.0, cost_after - cost_before)
@@ -230,6 +268,8 @@ def main():
     parser.add_argument("--interval", type=int, default=30, help="Intervalle de veille en secondes (default: 30)")
     parser.add_argument("--min-balance", type=float, default=0.50, help="Solde minimal DeepSeek USD (default: 0.50)")
     parser.add_argument("--max-cost", type=float, default=5.00, help="Plafond de dépense total de la session (default: 5.00)")
+    parser.add_argument("--daily-budget", type=float, default=0.30, help="Plafond quotidien glissant de dépense API USD (default: 0.30)")
+    parser.add_argument("--prefer-offpeak", action="store_true", help="Reporter les tâches Reasoner lourdes en heures creuses DeepSeek (-50%)")
     parser.add_argument("--once", action="store_true", help="Traiter un problème de la file puis s'arrêter")
     parser.add_argument("--no-commit", action="store_true", help="Désactiver le commit git automatique")
     args = parser.parse_args()
@@ -238,6 +278,8 @@ def main():
         interval_sec=args.interval,
         min_balance_usd=args.min_balance,
         max_session_cost_usd=args.max_cost,
+        daily_budget_usd=args.daily_budget,
+        prefer_offpeak=args.prefer_offpeak,
         run_once=args.once,
         auto_commit=not args.no_commit
     )

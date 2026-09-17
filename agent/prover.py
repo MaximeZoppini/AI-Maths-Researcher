@@ -61,6 +61,8 @@ class ProverConfig:
     enable_escalation: bool = True
     min_balance_threshold_usd: float = 0.50
     early_abort: bool = True
+    is_paid_bounty: bool = False
+    enable_free_tactics: bool = True
 
 class LLMProvider:
     """Dispatches requests to DeepSeek, Gemini, or OpenAI based on available keys."""
@@ -112,7 +114,7 @@ class LLMProvider:
                 {"role": "system", "content": "You are an elite formal mathematician specialized in Lean 4 and Mathlib. Output only valid Lean 4 code inside ```lean ... ``` without truncation."},
                 {"role": "user", "content": prompt}
             ],
-            "max_tokens": 16384 if is_reasoner else 4096
+            "max_tokens": 8192 if is_reasoner else 4096
         }
         # DeepSeek reasoner does not accept temperature
         if not is_reasoner:
@@ -271,12 +273,12 @@ class ProofSearchEngine:
 
         if history:
             prompt_parts.append("### Previous Attempt Diagnostics (Fix these errors):")
-            for h in history[-2:]:
-                prompt_parts.append(f"- Failed Code:\n```lean\n{h['code']}\n```")
-                if h.get("errors"):
-                    prompt_parts.append(f"- Compiler Errors: {h['errors']}")
-                if h.get("goals"):
-                    prompt_parts.append(f"- Unsolved Goal State:\n{h['goals']}\n")
+            last = history[-1]
+            prompt_parts.append(f"- Last Failed Code:\n```lean\n{last['code']}\n```")
+            if last.get("errors"):
+                prompt_parts.append(f"- Compiler Errors: {last['errors']}")
+            if last.get("goals"):
+                prompt_parts.append(f"- Unsolved Goal State:\n{last['goals']}\n")
 
         prompt_parts.append("Provide the complete, corrected Lean 4 code:")
         return "\n".join(prompt_parts)
@@ -303,6 +305,52 @@ class ProofSearchEngine:
         def _run_loop(repl: LeanREPL) -> Tuple[bool, str]:
             nonlocal total_cost
             seen_premise_names = {p.name for p in premises}
+
+            # 0. Pré-passe d'automation gratuite AVANT tout appel LLM ($0.00)
+            if self.config.enable_free_tactics:
+                free_tactics = [
+                    "norm_num",
+                    "omega",
+                    "ring",
+                    "linarith",
+                    "nlinarith",
+                    "decide",
+                    "aesop"
+                ]
+                print(f"  ⚡ Pré-passe d'automation gratuite ({len(free_tactics)} tactiques Mathlib standard)...")
+                for tac in free_tactics:
+                    tac_candidate = self.sanitize_code(f"by {tac}", theorem_decl)
+                    if context_code:
+                        clean_c = "\n".join(
+                            l for l in tac_candidate.splitlines()
+                            if not l.strip().startswith("import ")
+                            and not l.strip().startswith("set_option ")
+                            and not l.strip().startswith("open scoped ")
+                        ).strip()
+                        full_code = context_code.strip() + "\n\n" + clean_c
+                    else:
+                        full_code = tac_candidate
+
+                    repl_resp = repl.check_code(full_code, timeout_sec=2.0)
+                    if repl_resp.is_success:
+                        print(f"  ✨ Succès immédiat REPL avec 'by {tac}' ({repl_resp.duration_ms:.1f}ms) ! Audit Prod...")
+                        prod_res = self.verifier.verify_file_content(full_code, temp_name=f"{problem_name}.lean")
+                        if prod_res.success:
+                            print(f"  🏆 PREUVE CERTIFIÉE GRATUITEMENT VIA '{tac}' ! ($0.00 USD, 0 token)")
+                            self.db.record_attempt(
+                                problem_name=problem_name,
+                                iteration=0,
+                                model="tactic-automation",
+                                prompt=f"Auto-tactic: {tac}",
+                                candidate_code=full_code,
+                                success=True,
+                                duration_ms=repl_resp.duration_ms,
+                                prompt_tokens=0,
+                                completion_tokens=0,
+                                cost_usd=0.0,
+                                difficulty_class=difficulty_class
+                            )
+                            return True, full_code
 
             for iteration in range(1, self.config.max_attempts + 1):
                 # 0. Kill-switch STOP
@@ -338,9 +386,20 @@ class ProofSearchEngine:
                         print(f"🛑 Abandon précoce : Erreur de compilation identique répétée. Arrêt.")
                         break
 
-                # 4. Escalade dynamique de modèle : tentatives 1-2 chat, tentatives 3+ reasoner
+                # 4. Escalade dynamique de modèle : tentatives 1-2 chat, tentatives 3+ reasoner conditionnée
                 if self.config.enable_escalation and iteration >= 3 and self.llm.deepseek_key:
-                    active_model = "deepseek-reasoner"
+                    from agent.db import classify_problem
+                    diff_class = difficulty_class or classify_problem(problem_name)
+                    cls_stats = self.db.get_success_rates_by_class().get(diff_class, {})
+                    p_succ = cls_stats.get("p_success", 0.0) if cls_stats.get("attempted", 0) >= 3 else 0.20
+                    is_paid_bounty = getattr(self.config, "is_paid_bounty", False)
+
+                    # Règle Tâche 9 : Ne JAMAIS escalader si p_success < 0.15 (ex: imo) sauf si bounty payant
+                    if p_succ >= 0.15 or is_paid_bounty:
+                        active_model = "deepseek-reasoner"
+                    else:
+                        print(f"  ℹ️ Escalade reasoner bloquée pour classe '{diff_class}' (p_success {p_succ*100:.1f}% < 15% et non-bounty). Maintien sur {self.config.model}.")
+                        active_model = self.config.model
                 else:
                     active_model = self.config.model
 
