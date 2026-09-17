@@ -1,6 +1,6 @@
 # 🏆 AI-Maths-Researcher — Rapport Officiel de Certification & Bounties
 
-> **Généré le** : `2026-09-17 14:55:05 UTC`  
+> **Généré le** : `2026-09-17 15:10:19 UTC`  
 > **Infra de Vérification** : LXC Container 200 (Proxmox 100.90.108.89)  
 > **Lean 4 / Mathlib** : `v4.34.0` | **Axiomes Admis** : `[propext, Classical.choice, Quot.sound]` (Strict Zero-Sorry)
 
@@ -10,11 +10,11 @@
 
 | Métrique | Valeur |
 | :--- | :--- |
-| 🎯 **Métrique Officielle MiniF2F Test (Set Figé)** | **18 / 35** (51.4%) |
+| 🎯 **Métrique Officielle MiniF2F Test (Set Figé)** | **19 / 36** (52.8%) |
 | **Sous-Lemmes Décomposés & Résolus** | **9 / 19** |
-| **Nombre Total de Tentatives** | **258** |
-| **Temps Moyen par Tentative (REPL)** | **805.6 ms** |
-| **Coût Total Consommé (API LLM)** | **$0.9814** |
+| **Nombre Total de Tentatives** | **261** |
+| **Temps Moyen par Tentative (REPL)** | **802.3 ms** |
+| **Coût Total Consommé (API LLM)** | **$0.9820** |
 
 ---
 
@@ -22,7 +22,7 @@
 
 | Classe | Tentés | Résolus | p_success |
 | :--- | :--- | :--- | :--- |
-| `mathd` | 16 | 13 | **81.2%** |
+| `mathd` | 17 | 14 | **82.4%** |
 | `olympiad_other` | 8 | 3 | **37.5%** |
 | `imo` | 6 | 0 | **0.0%** |
 | `amc` | 4 | 1 | **25.0%** |
@@ -35,7 +35,7 @@
 
 | Modèle | Essais | Succès | Taux | Latence Moy. | Coût Total |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `deepseek-chat` | 219 | 28 | 12.8% | 889.5 ms | $0.0953 |
+| `deepseek-chat` | 222 | 29 | 13.1% | 884.4 ms | $0.0959 |
 | `deepseek-reasoner` | 32 | 7 | 21.9% | 395.0 ms | $0.8861 |
 | `gemini-2.5-flash` | 7 | 2 | 28.6% | 60.5 ms | $0.0000 |
 
@@ -458,6 +458,30 @@ theorem mathd_algebra_33 (x y z : ℝ) (h₀ : x ≠ 0) (h₁ : 2 * x = 5 * y) (
   rw [hyz, hxy]
   field_simp
   ring
+```
+
+### 🎯 Théorème : `mathd_algebra_392`
+- **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
+- **Modèle** : `deepseek-chat` | **Itération** : 2 | **Latence REPL** : 715.4 ms | **Coût** : $0.00021
+- **Timestamp** : `2026-09-17 15:10:15`
+
+```lean
+import Mathlib.Algebra.Group.Int.Even
+import Mathlib.Tactic
+
+theorem mathd_algebra_392 (n : ℕ) (h₀ : Even n)
+    (h₁ : (↑n - 2) ^ 2 + ↑n ^ 2 + (↑n + 2) ^ 2 = (12296 : ℤ)) :
+    (↑n - 2) * ↑n * (↑n + 2) / 8 = (32736 : ℤ) := by
+  have h2 : (n : ℤ) ^ 2 = 4096 := by
+    have : (↑n - 2 : ℤ) ^ 2 + ↑n ^ 2 + (↑n + 2) ^ 2 = 3 * ↑n ^ 2 + 8 := by ring
+    rw [this] at h₁
+    linarith
+  have hn : (n : ℤ) = 64 := by
+    have hpos : (0 : ℤ) ≤ (n : ℤ) := by exact_mod_cast Nat.zero_le n
+    nlinarith [sq_nonneg ((n : ℤ) - 64), sq_nonneg ((n : ℤ) + 64)]
+  have hn' : n = 64 := by exact_mod_cast hn
+  subst hn'
+  norm_num
 ```
 
 ### 🎯 Théorème : `mathd_algebra_398`

@@ -48,7 +48,7 @@ class Target:
             "deadline": self.deadline,
             "source_url": self.source_url,
             "submission": self.submission,
-            "verified": "true" if self.verified else "false"
+            "verified": self.verified
         }
 
 def config_for(target: Target, p_success: float) -> ProverConfig:
@@ -121,95 +121,37 @@ def config_for(target: Target, p_success: float) -> ProverConfig:
 
 from pathlib import Path
 from typing import List
+import yaml
 
-def parse_simple_yaml(text: str) -> List[Dict[str, Any]]:
-    """Zero-dependency parser for target YAML registry files."""
-    items = []
-    current = None
-    multiline_key = None
-    multiline_lines = []
+class YamlDumper(yaml.SafeDumper):
+    pass
 
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
-            continue
+def _multiline_str_representer(dumper: yaml.SafeDumper, data: str):
+    if '\n' in data:
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
 
-        if stripped.startswith('- '):
-            if current:
-                if multiline_key:
-                    current[multiline_key] = '\n'.join(multiline_lines).strip()
-                    multiline_key = None
-                    multiline_lines = []
-                items.append(current)
-            current = {}
-            line_content = stripped[2:].strip()
-            if ':' in line_content:
-                k, v = line_content.split(':', 1)
-                k = k.strip()
-                v = v.strip().strip('\"\'')
-                if v == '|':
-                    multiline_key = k
-                else:
-                    current[k] = v
-        elif current is not None:
-            if multiline_key:
-                if line.startswith('    ') or line.startswith('\t\t') or line.startswith('  '):
-                    multiline_lines.append(line.strip())
-                elif ':' in stripped:
-                    current[multiline_key] = '\n'.join(multiline_lines).strip()
-                    multiline_key = None
-                    multiline_lines = []
-                    k, v = stripped.split(':', 1)
-                    k = k.strip()
-                    v = v.strip().strip('\"\'')
-                    if v == '|':
-                        multiline_key = k
-                    else:
-                        current[k] = v
-            elif ':' in stripped:
-                k, v = stripped.split(':', 1)
-                k = k.strip()
-                v = v.strip().strip('\"\'')
-                if v == '|':
-                    multiline_key = k
-                else:
-                    current[k] = v
-
-    if current:
-        if multiline_key:
-            current[multiline_key] = '\n'.join(multiline_lines).strip()
-        items.append(current)
-    return items
-
-def dump_simple_yaml(items: List[Dict[str, Any]]) -> str:
-    """Zero-dependency dumper for target YAML registry files."""
-    lines = []
-    for item in items:
-        lines.append(f"- name: {item.get('name', '')}")
-        for k, v in item.items():
-            if k == 'name':
-                continue
-            if isinstance(v, str) and '\n' in v:
-                lines.append(f"  {k}: |")
-                for line in v.splitlines():
-                    lines.append(f"    {line}")
-            else:
-                lines.append(f"  {k}: {v}")
-    return '\n'.join(lines) + '\n'
+YamlDumper.add_representer(str, _multiline_str_representer)
 
 def load_targets(path: Path) -> List[Target]:
     if not path.exists():
         return []
-    raw = parse_simple_yaml(path.read_text(encoding="utf-8"))
+    content = path.read_text(encoding="utf-8").strip()
+    if not content:
+        return []
+    raw = yaml.safe_load(content)
+    if not raw or not isinstance(raw, list):
+        return []
     return [Target.from_dict(d) for d in raw]
 
 def save_targets(path: Path, targets: List[Target]):
     path.parent.mkdir(parents=True, exist_ok=True)
     raw = [t.to_dict() for t in targets]
-    content = dump_simple_yaml(raw)
+    content = yaml.dump(raw, Dumper=YamlDumper, default_flow_style=False, allow_unicode=True, sort_keys=False)
     try:
         path.write_text(content, encoding="utf-8")
     except PermissionError:
         import subprocess
         subprocess.run(["sh", "-c", f"cat > '{path}'"], input=content, text=True, check=True)
+
 

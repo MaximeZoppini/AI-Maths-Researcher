@@ -2,7 +2,7 @@ import Mathlib.Tactic
 import Mathlib.Data.Real.Basic
 import Mathlib.Algebra.Ring.Parity
 
-/-- Solution to linear equation 4*x + 3 = 19 over real numbers. -/
+/-- Sum of reciprocals problem -/
 theorem mathd_algebra_137 (x : ℕ) (h₀ : ↑x + (4 : ℝ) / (100 : ℝ) * ↑x = 598) : x = 575 := by
   have h₁ : (↑x : ℝ) * (1 + 4 / 100) = 598 := by
     linarith

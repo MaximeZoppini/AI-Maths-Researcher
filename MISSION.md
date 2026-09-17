@@ -151,6 +151,56 @@ restants, coût estimé, solde, GO/NO-GO — sans aucun appel LLM.
 
 ---
 
+## 🔴 AUDIT POST-MISSION (2026-09-17) — 2 correctifs avant mise en route
+
+### TÂCHE 7 — BLOQUANT : remplacer le parseur YAML maison par PyYAML
+
+`agent/targets.py` : `parse_simple_yaml` est cassé. Quand une entrée contient
+`statement: |`, toutes les clés suivantes (indentées de 2 espaces) sont absorbées
+dans le bloc multiligne. Conséquences mesurées :
+- `registry.yaml` : `verified: true` n'est JAMAIS lu → `load_targets` retourne
+  `verified=False` pour 5 entrées sur 5, `rank_targets` et le daemon ignorent tout,
+  y compris les cibles valides. Le système est inerte.
+- Les métadonnées (`kind`, `value_usd`, `source_url`…) se retrouvent DANS le texte
+  de l'énoncé (vérifié : `statement` de `mathd_algebra_392` contient
+  `kind: benchmark\nvalue_usd: 0.0…`).
+- Le parseur fait `line.strip()` sur chaque ligne → l'indentation Lean des énoncés
+  est détruite (un `sorry` désindenté après `by` n'est plus valide).
+
+**Fix :** PyYAML 6.0.3 est installé sur la machine. Supprimer `parse_simple_yaml`
+et `dump_simple_yaml`, utiliser `yaml.safe_load` / `yaml.safe_dump`
+(`default_flow_style=False, allow_unicode=True`, style `|` pour `statement`).
+Ne PAS réécrire un parseur à la main.
+
+**Acceptation :** `load_targets(registry)` retourne `verified=True` pour les 2 entrées
+benchmark ; `statement` ne contient aucune clé de métadonnée ; l'indentation Lean est
+préservée à l'octet près (round-trip load→save→load identique) ;
+`python3 -B scripts/rank_targets.py` classe les 2 cibles vérifiées.
+
+### TÂCHE 8 — Fiabiliser le rapport mathlib_gaps (conclusions trompeuses)
+
+`scripts/mathlib_gaps.py` marque « absent » 14 identifiants sur 14 — faux. Vérifié :
+`Real.sq_abs` est marqué absent alors que le lemme existe sous le nom `sq_abs`
+(la requête Loogle sur le nom exact échoue, donc tout nom mal préfixé passe pour
+un trou Mathlib). Un rapport qui dit « cible prioritaire pour PR » sur un lemme
+existant conduit à une PR refusée.
+
+**Fix :**
+1. Filtrer les noms d'hypothèses locales (`hy1`, `hc2`… : minuscule + court +
+   sans namespace) qui ne sont pas des candidats.
+2. Pour chaque identifiant : requêter Loogle sur le nom exact PUIS sur le dernier
+   segment (`Real.sq_abs` → `sq_abs`). Si le segment matche : statut
+   `existe_sous_autre_nom` avec le nom trouvé (info précieuse : c'est un correctif
+   de prompt/retrieval, pas un trou Mathlib).
+3. Renommer le statut `absent` en `introuvable_via_loogle` — Loogle qui ne trouve
+   pas ≠ le lemme n'existe pas. Ajuster la légende du rapport.
+
+**Acceptation :** `Real.sq_abs` → `existe_sous_autre_nom (sq_abs)` ; `hy1`/`hc2`
+absents du rapport ; regénérer `reports/mathlib_gaps_*.md` et supprimer les anciens
+rapports trompeurs.
+
+---
+
 ## Après cette mission
 
 Plus AUCUN développement du harnais sans preuve qu'un composant est le facteur

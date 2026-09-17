@@ -41,7 +41,7 @@ def safe_write_file(path: Path, content: str):
 
 def git_commit_proof(problem_name: str, cost: float):
     try:
-        subprocess.run(["git", "add", "problems/", "targets/queue.yaml", "BOUNTY_REPORT.md", "data/backups/"], cwd=str(ROOT_DIR), check=True)
+        subprocess.run(["git", "add", "problems/", "targets/queue.yaml", "BOUNTY_REPORT.md"], cwd=str(ROOT_DIR), check=True)
         msg = f"feat(daemon): certifie {problem_name} sans sorry (coût: ${cost:.4f})"
         subprocess.run(["git", "commit", "-m", msg], cwd=str(ROOT_DIR), check=True)
         print(f"📦 Commit Git créé avec succès : '{msg}'")

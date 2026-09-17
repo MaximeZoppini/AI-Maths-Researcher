@@ -19,7 +19,8 @@ from typing import List, Dict, Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.targets import Target, load_targets, save_targets, parse_simple_yaml
+import yaml
+from agent.targets import Target, load_targets, save_targets
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 WATCHLIST_PATH = ROOT_DIR / "targets" / "watchlist.yaml"
@@ -31,7 +32,12 @@ def load_watchlist(path: Optional[Path] = None) -> List[Dict[str, Any]]:
     target_path = path or WATCHLIST_PATH
     if not target_path.exists():
         return []
-    raw = parse_simple_yaml(target_path.read_text(encoding="utf-8"))
+    content = target_path.read_text(encoding="utf-8").strip()
+    if not content:
+        return []
+    raw = yaml.safe_load(content)
+    if not raw or not isinstance(raw, list):
+        return []
     entries = []
     for item in raw:
         repo = item.get("repo")

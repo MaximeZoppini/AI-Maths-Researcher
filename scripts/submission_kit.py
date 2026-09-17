@@ -14,10 +14,9 @@ import sys
 import re
 from pathlib import Path
 from typing import Optional, Dict, Any
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from agent.targets import parse_simple_yaml
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 PROBLEMS_DIR = ROOT_DIR / "problems"
@@ -102,8 +101,8 @@ def generate_submission(
         sys.exit(1)
 
     raw_profile_text = profile_path.read_text(encoding="utf-8")
-    profile_items = parse_simple_yaml(raw_profile_text)
-    profile = profile_items[0] if profile_items else {}
+    loaded_profile = yaml.safe_load(raw_profile_text) or {}
+    profile = loaded_profile[0] if isinstance(loaded_profile, list) else loaded_profile
 
     raw_code = source_file.read_text(encoding="utf-8")
     cleaned_code = clean_lean_code(raw_code, target_name, docstring=docstring)

@@ -1,20 +1,9 @@
-# FILE D'ATTENTE OPÉRATIONNELLE DU DAEMON (targets/queue.yaml)
-# Les entrées verified: false sont ignorées par le daemon.
-- name: mathd_algebra_392
-  kind: benchmark
-  value_usd: 0.0
-  difficulty_class: mathd
-  verified: true
-  statement: |
-    theorem mathd_algebra_392 (n : ℕ) (h₀ : Even n)
-    (h₁ : (↑n - 2) ^ 2 + ↑n ^ 2 + (↑n + 2) ^ 2 = (12296 : ℤ)) :
-    (↑n - 2) * ↑n * (↑n + 2) / 8 = (32736 : ℤ) := by
-      sorry
-
 - name: draft_external_candidate_example
+  statement: -- Brouillon en attente
   kind: bounty
   value_usd: 0.0
   difficulty_class: unknown
+  deadline: null
+  source_url: null
+  submission: null
   verified: false
-  statement: |
-    -- Brouillon en attente
