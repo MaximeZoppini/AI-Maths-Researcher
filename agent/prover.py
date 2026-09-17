@@ -18,35 +18,82 @@ from agent.verifier import RemoteProdVerifier, VerificationResult
 from agent.retrieval import PremiseRetriever, Premise
 from agent.db import AttemptsDB
 
+def load_dotenv():
+    """Auto-loads environment variables from .env in project root if present."""
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+
+load_dotenv()
+
 @dataclass
 class ProverConfig:
     max_attempts: int = 6
     budget_usd: float = 1.00
-    model: str = "gemini-2.5-flash"
+    model: str = "deepseek-chat"
     temperature: float = 0.2
     timeout_per_attempt_sec: int = 15
 
 class LLMProvider:
-    """Dispatches requests to Gemini, DeepSeek, or OpenAI based on available keys."""
-    def __init__(self, model: str = "gemini-2.5-flash"):
-        self.model = model
-        self.gemini_key = os.environ.get("GEMINI_API_KEY")
+    """Dispatches requests to DeepSeek, Gemini, or OpenAI based on available keys."""
+    def __init__(self, model: Optional[str] = None):
+        load_dotenv()
         self.deepseek_key = os.environ.get("DEEPSEEK_API_KEY")
+        self.gemini_key = os.environ.get("GEMINI_API_KEY")
         self.openai_key = os.environ.get("OPENAI_API_KEY")
+        
+        if model:
+            self.model = model
+        elif self.deepseek_key:
+            self.model = "deepseek-chat"
+        elif self.gemini_key:
+            self.model = "gemini-2.5-flash"
+        elif self.openai_key:
+            self.model = "gpt-4o-mini"
+        else:
+            self.model = "fallback-tactic-search"
 
     def generate(self, prompt: str, theorem_decl: str, iteration: int = 1, temperature: float = 0.2) -> Tuple[str, int, int, float]:
         """
         Returns (generated_code, prompt_tokens, completion_tokens, cost_usd).
-        Falls back to intelligent tactic search if no external API key is set.
         """
-        if self.gemini_key:
-            return self._call_gemini(prompt, temperature)
-        elif self.deepseek_key:
+        if self.deepseek_key:
             return self._call_deepseek(prompt, temperature)
+        elif self.gemini_key:
+            return self._call_gemini(prompt, temperature)
         elif self.openai_key:
             return self._call_openai(prompt, temperature)
         else:
             return self._fallback_tactic_generator(theorem_decl, iteration)
+
+    def _call_deepseek(self, prompt: str, temperature: float) -> Tuple[str, int, int, float]:
+        url = "https://api.deepseek.com/chat/completions"
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "You are an elite formal mathematician specialized in Lean 4 and Mathlib. Output only valid Lean 4 code."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": temperature,
+            "max_tokens": 2048
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.deepseek_key}"}
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            text = data["choices"][0]["message"]["content"]
+            usage = data.get("usage", {})
+            p_tok = usage.get("prompt_tokens", 0)
+            c_tok = usage.get("completion_tokens", 0)
+            cost = (p_tok * 0.00000014) + (c_tok * 0.00000028)
+            return text, p_tok, c_tok, cost
 
     def _call_gemini(self, prompt: str, temperature: float) -> Tuple[str, int, int, float]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.gemini_key}"
@@ -71,27 +118,6 @@ class LLMProvider:
             p_tok = usage.get("promptTokenCount", len(prompt) // 4)
             c_tok = usage.get("candidatesTokenCount", len(text) // 4)
             cost = (p_tok * 0.0000001) + (c_tok * 0.0000004)
-            return text, p_tok, c_tok, cost
-
-    def _call_deepseek(self, prompt: str, temperature: float) -> Tuple[str, int, int, float]:
-        url = "https://api.deepseek.com/chat/completions"
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature
-        }
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.deepseek_key}"}
-        )
-        with urllib.request.urlopen(req, timeout=25) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            text = data["choices"][0]["message"]["content"]
-            usage = data.get("usage", {})
-            p_tok = usage.get("prompt_tokens", 0)
-            c_tok = usage.get("completion_tokens", 0)
-            cost = (p_tok * 0.00000014) + (c_tok * 0.00000028)
             return text, p_tok, c_tok, cost
 
     def _call_openai(self, prompt: str, temperature: float) -> Tuple[str, int, int, float]:
@@ -133,9 +159,9 @@ class LLMProvider:
         return f"```lean\n{code}\n```", len(theorem_decl)//4, len(code)//4, 0.0
 
 class ProofSearchEngine:
-    def __init__(self, config: ProverConfig = ProverConfig()):
-        self.config = config
-        self.llm = LLMProvider(model=config.model)
+    def __init__(self, config: Optional[ProverConfig] = None):
+        self.config = config or ProverConfig()
+        self.llm = LLMProvider(model=self.config.model)
         self.retriever = PremiseRetriever()
         self.verifier = RemoteProdVerifier()
         self.db = AttemptsDB()
@@ -145,11 +171,9 @@ class ProofSearchEngine:
         matches = re.findall(r"```lean(.*?)```", raw_text, re.DOTALL)
         code = matches[-1].strip() if matches else raw_text.strip()
 
-        # If model only provided proof block (by ...)
         if "theorem" not in code and "lemma" not in code:
             code = f"{theorem_decl} := {code}"
 
-        # Guarantee standard Mathlib imports
         if not code.startswith("import"):
             code = "import Mathlib.Tactic\nimport Mathlib.Algebra.Ring.Parity\n\nset_option linter.style.header false\n\n" + code
 
@@ -189,13 +213,12 @@ class ProofSearchEngine:
 
     def prove_theorem(self, theorem_decl: str, problem_name: str = "Candidate") -> Tuple[bool, str]:
         print(f"\n🧠 Lancement de la recherche de preuve pour '{problem_name}'...")
+        print(f"Modèle actif : {self.llm.model}")
         print(f"Énoncé : {theorem_decl.strip().splitlines()[0]}")
 
-        # 1. Retrieve Mathlib premises via Loogle
-        print("🔍 Récupération des lemmes Mathlib via Loogle...")
         premises = self.retriever.retrieve_for_statement(theorem_decl)
         if premises:
-            print(f"  → {len(premises)} lemmes pertinents récupérés.")
+            print(f"  → {len(premises)} lemmes Mathlib pertinents récupérés via Loogle.")
 
         history: List[Dict[str, Any]] = []
         total_cost = 0.0
@@ -207,9 +230,8 @@ class ProofSearchEngine:
                     break
 
                 prompt = self.build_prompt(theorem_decl, premises, history)
-                print(f"\n[Tentative {iteration}/{self.config.max_attempts}] Génération de preuve...")
+                print(f"\n[Tentative {iteration}/{self.config.max_attempts}] Génération de preuve ({self.llm.model})...")
 
-                # Call LLM / tactic engine
                 raw_llm, p_tok, c_tok, cost = self.llm.generate(
                     prompt,
                     theorem_decl=theorem_decl,
@@ -227,14 +249,12 @@ class ProofSearchEngine:
                 if repl_resp.is_success:
                     print(f"  ✨ REPL validé en {repl_resp.duration_ms:.1f}ms ! Envoi au Juge Final (LXC Prod)...")
                     
-                    # Level 2 Verification (LXC Prod: lake env lean + #print axioms audit)
                     prod_res = self.verifier.verify_file_content(candidate_code, temp_name=f"{problem_name}.lean")
                     
-                    # Record in DB
                     self.db.record_attempt(
                         problem_name=problem_name,
                         iteration=iteration,
-                        model=self.config.model,
+                        model=self.llm.model,
                         prompt=prompt,
                         candidate_code=candidate_code,
                         success=prod_res.success,
@@ -260,11 +280,10 @@ class ProofSearchEngine:
                     goal_text = "\n".join(repl_resp.goals)
                     print(f"  ❌ Échec REPL ({repl_resp.duration_ms:.1f}ms) : {err_text[:120]}...")
 
-                    # Record in DB
                     self.db.record_attempt(
                         problem_name=problem_name,
                         iteration=iteration,
-                        model=self.config.model,
+                        model=self.llm.model,
                         prompt=prompt,
                         candidate_code=candidate_code,
                         success=False,

@@ -6,6 +6,11 @@ build/
 *.c
 *.o
 
+# Environment & API keys
+.env
+.env.*
+*.env
+
 # Python artifacts
 __pycache__/
 *.py[cod]
@@ -14,6 +19,7 @@ __pycache__/
 env/
 venv/
 *.egg-info/
+data/
 
 # OS / Editor
 .DS_Store
