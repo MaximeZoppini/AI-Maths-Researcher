@@ -35,15 +35,16 @@ def safe_write_text(path: Path, content: str):
 
 def find_problem_file(target_name: str) -> Optional[Path]:
     """Finds the source Lean file corresponding to target_name in problems/."""
-    direct = PROBLEMS_DIR / f"{target_name}.lean"
+    clean_target = target_name[:-5] if target_name.endswith(".lean") else target_name
+    direct = PROBLEMS_DIR / f"{clean_target}.lean"
     if direct.exists():
         return direct
-    minif2f_direct = PROBLEMS_DIR / f"minif2f_{target_name}.lean"
+    minif2f_direct = PROBLEMS_DIR / f"minif2f_{clean_target}.lean"
     if minif2f_direct.exists():
         return minif2f_direct
     # Search by partial match
     for f in PROBLEMS_DIR.glob("*.lean"):
-        if target_name in f.stem:
+        if clean_target in f.stem or clean_target == f.name:
             return f
     return None
 
@@ -173,18 +174,44 @@ gh pr create --repo "${{REPO}}" --title "feat(Mathlib): add ${{TARGET}}" --body-
     print("👉 Relecture humaine requise : complétez CHECKLIST.md puis exécutez commands.sh à la main.")
     return out_dir
 
+def package_all_solved(profile_path: Path = DEFAULT_PROFILE) -> list[Path]:
+    """Packages all certified problems in problems/ into submissions/."""
+    results = []
+    lean_files = sorted(list(PROBLEMS_DIR.glob("*.lean")))
+    print(f"\n📦 Packaging de l'ensemble des {len(lean_files)} problèmes certifiés dans submissions/...")
+    for f in lean_files:
+        clean_name = f.stem.replace("minif2f_", "")
+        try:
+            out_dir = generate_submission(
+                target_name=f.name,
+                profile_path=profile_path,
+                docstring=f"Formalized proof of `{clean_name}` in Lean 4."
+            )
+            results.append(out_dir)
+        except Exception as e:
+            print(f"  ⚠️ Erreur lors du packaging de {f.name}: {e}")
+    print(f"\n✨ {len(results)}/{len(lean_files)} kits de PR prêts pour revue dans {SUBMISSIONS_DIR} !")
+    return results
+
 def main():
     parser = argparse.ArgumentParser(description="AI-Maths-Researcher Submission Kit")
-    parser.add_argument("--target", type=str, required=True, help="Nom du théorème cible ou fichier dans problems/")
+    parser.add_argument("--target", type=str, default=None, help="Nom du théorème cible ou fichier dans problems/")
+    parser.add_argument("--package-all", action="store_true", help="Générer les kits de soumission pour TOUS les problèmes résolus dans problems/")
     parser.add_argument("--profile", type=str, default=str(DEFAULT_PROFILE), help="Chemin vers le profil de repo (default: mathlib4.yaml)")
     parser.add_argument("--docstring", type=str, default=None, help="Docstring explicative (/-- ... -/) si absente du fichier")
     args = parser.parse_args()
 
-    generate_submission(
-        target_name=args.target,
-        profile_path=Path(args.profile),
-        docstring=args.docstring
-    )
+    if args.package_all:
+        package_all_solved(profile_path=Path(args.profile))
+    elif args.target:
+        generate_submission(
+            target_name=args.target,
+            profile_path=Path(args.profile),
+            docstring=args.docstring
+        )
+    else:
+        parser.print_help()
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

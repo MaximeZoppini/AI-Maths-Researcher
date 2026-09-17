@@ -53,6 +53,24 @@ Tous les problèmes ci-dessous sont **formellement prouvés, sans `sorry` ni `ax
 
 ---
 
+## 🔄 Pipeline Autonome de Bout en Bout (End-to-End)
+
+Le système implémente une chaîne complète du problème brut jusqu'au kit de Pull Request prêt à relire :
+
+```
+1. Détection / Benchmark (Watcher GitHub API / Cibles vérifiées / MiniF2F 244)
+                  ↓
+2. Résolution IA & REPL (DeepSeek Chat/Reasoner + BlueprintPlanner + Loogle)
+                  ↓
+3. Certification Prod LXC (Compilation Lake + audit strict #print axioms zero-sorry)
+                  ↓
+4. Packaging PR Automatique (submissions/<nom>/ : code nettoyé, PR_BODY.md, CHECKLIST.md, commands.sh)
+                  ↓
+5. Revue Humaine & Validation (L'opérateur coche la checklist et exécute commands.sh)
+```
+
+---
+
 ## 🚀 Commandes & Utilisation de l'Agent
 
 ### 1. Vérifier un problème spécifique sur la prod
@@ -64,7 +82,7 @@ python3 -m agent.researcher --verify problems/Problem3_Inequalities.lean
 ```
 
 ### 2. Audit formel global en Prod (Garantie Anti-Sorry / Anti-Axiom)
-Compile tout le projet et valide l'absence stricte de `sorry` ou `axiom` :
+Compile tout le projet et valide l'absence stricte de `sorry` ou `axiom` sur l'ensemble des 25 théorèmes :
 ```bash
 python3 -m agent.researcher --check-all
 ```
@@ -79,7 +97,7 @@ python3 -m agent.researcher --deploy -m "feat: add new formal proof"
 > **Note :** Un timer systemd (`lean-sync.timer`) tourne également en tâche de fond sur le conteneur pour synchroniser automatiquement les commits GitHub toutes les 60 secondes.
 
 ### 4. Benchmark MiniF2F & Analyse Pré-Vol (Pre-Flight)
-Vérification des 244 théorèmes officiels avec estimation du coût API et contrôle de solvabilité :
+Vérification des 244 théorèmes officiels avec estimation du coût API et packaging automatique des succès dans `submissions/` :
 ```bash
 # Simulation sans appel API ni coût (vérification budget & tokens)
 python3 -B -m benchmarks.minif2f --limit 244 --skip-solved --dry-run
@@ -88,25 +106,29 @@ python3 -B -m benchmarks.minif2f --limit 244 --skip-solved --dry-run
 python3 -B -m benchmarks.minif2f --limit 244 --attempts 3 --pass-k 2 --skip-solved
 ```
 
-### 5. Préparation de Soumission Mathlib (Kit Sans Action Réseau)
+### 5. Kits de Soumission PR Mathlib (Zéro Action Réseau Auto)
 Génère le dossier `submissions/<cible>/` avec code conforme, corps de PR, checklist et script de commandes manuelles :
 ```bash
+# Packager une cible individuelle
 python3 -B scripts/submission_kit.py --target mathd_algebra_137
+
+# Packager en lot TOUS les problèmes résolus dans problems/
+python3 -B scripts/submission_kit.py --package-all
 ```
 
 ### 6. Analyse des Manques Mathlib & Lemmes Hallucinés
-Analyse les erreurs compilateur de `data/attempts.db` et interroge Loogle pour identifier les lemmes manquants :
+Analyse les erreurs compilateur de `data/attempts.db` et interroge Loogle pour identifier les lemmes manquants (rapport décisionnel fiable avec détection des namespaces erronés) :
 ```bash
 python3 -B scripts/mathlib_gaps.py
 ```
 
-### 7. Daemon de Veille & Priorisation des Cibles
-Surveillance périodique, détection d'issues GitHub (watchlist) et priorisation stricte des cibles `verified: true` :
+### 7. Daemon de Veille & Résolution Autonome
+Surveillance périodique, détection d'issues GitHub (watchlist), filtrage strict des cibles `verified: true`, résolution et packaging PR automatique :
 ```bash
-# Un seul cycle d'inspection
-python3 -B scripts/daemon.py --run-once
+# Exécution d'un cycle unique de travail
+python3 -B scripts/daemon.py --once
 
-# Classement des cibles vérifiées par ratio rentabilité / faisabilité
+# Classement économique des cibles vérifiées par ratio rentabilité / faisabilité
 python3 -B scripts/rank_targets.py
 ```
 

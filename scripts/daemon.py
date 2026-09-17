@@ -41,7 +41,7 @@ def safe_write_file(path: Path, content: str):
 
 def git_commit_proof(problem_name: str, cost: float):
     try:
-        subprocess.run(["git", "add", "problems/", "targets/queue.yaml", "BOUNTY_REPORT.md"], cwd=str(ROOT_DIR), check=True)
+        subprocess.run(["git", "add", "problems/", "targets/queue.yaml", "BOUNTY_REPORT.md", "submissions/"], cwd=str(ROOT_DIR), check=True)
         msg = f"feat(daemon): certifie {problem_name} sans sorry (coût: ${cost:.4f})"
         subprocess.run(["git", "commit", "-m", msg], cwd=str(ROOT_DIR), check=True)
         print(f"📦 Commit Git créé avec succès : '{msg}'")
@@ -179,6 +179,14 @@ def run_daemon(
                 out_path = PROBLEMS_DIR / f"{current_target.name}.lean"
                 safe_write_file(out_path, proof_code + "\n")
                 print(f"💾 Fichier de preuve enregistré dans {out_path}")
+
+                # Génération automatique du package de soumission PR prêt pour revue humaine
+                try:
+                    from scripts.submission_kit import generate_submission
+                    sub_dir = generate_submission(current_target.name, docstring=f"Formal proof of `{current_target.name}` in Lean 4.")
+                    print(f"📦 Kit de soumission PR prêt dans {sub_dir}")
+                except Exception as e:
+                    print(f"⚠️ Erreur génération kit de soumission pour {current_target.name}: {e}")
 
                 # Retirer la cible de la file
                 remaining = queue[1:]

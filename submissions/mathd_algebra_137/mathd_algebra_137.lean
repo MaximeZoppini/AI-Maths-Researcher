@@ -2,7 +2,7 @@ import Mathlib.Tactic
 import Mathlib.Data.Real.Basic
 import Mathlib.Algebra.Ring.Parity
 
-/-- Sum of reciprocals problem -/
+/-- Formalized proof of `mathd_algebra_137` in Lean 4. -/
 theorem mathd_algebra_137 (x : ℕ) (h₀ : ↑x + (4 : ℝ) / (100 : ℝ) * ↑x = 598) : x = 575 := by
   have h₁ : (↑x : ℝ) * (1 + 4 / 100) = 598 := by
     linarith

@@ -196,6 +196,13 @@ def run_benchmark(
                 out_file = Path("problems") / f"minif2f_{name}.lean"
                 safe_write_file(out_file, code + "\n")
                 print(f"  💾 [{completed_count}/{total_problems}] Preuve enregistrée dans {out_file}")
+                # Génération automatique du package de soumission PR prêt pour revue humaine
+                try:
+                    from scripts.submission_kit import generate_submission
+                    sub_dir = generate_submission(name, docstring=f"Formal proof of `{name}` in Lean 4 (MiniF2F benchmark).")
+                    print(f"  📦 Kit de soumission PR prêt dans {sub_dir}")
+                except Exception as e:
+                    print(f"  ⚠️ Erreur génération kit de soumission pour {name}: {e}")
             else:
                 failed_problems.append(name)
                 print(f"  ❌ [{completed_count}/{total_problems}] Non résolu : {name}")
