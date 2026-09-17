@@ -129,7 +129,7 @@ Format your answer as:
     def verify_skeleton(self, skeleton_code: str, repl: LeanREPL) -> Tuple[bool, str]:
         """Validates that the skeleton compiles in REPL (allowing sorry)."""
         resp = repl.check_code(skeleton_code)
-        if resp.is_success:
+        if resp.is_valid_syntax:
             return True, ""
         return False, "\n".join(resp.error_texts)
 

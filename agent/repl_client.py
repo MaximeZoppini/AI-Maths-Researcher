@@ -40,6 +40,11 @@ class REPLResponse:
     def is_success(self) -> bool:
         return (not self.has_errors) and (len(self.sorries) == 0)
 
+    @property
+    def is_valid_syntax(self) -> bool:
+        """Returns True if the code compiled without errors (sorries are permitted)."""
+        return not self.has_errors
+
 class LeanREPL:
     def __init__(
         self,

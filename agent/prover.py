@@ -276,7 +276,16 @@ class ProofSearchEngine:
                 total_cost += cost
 
                 candidate_code = self.sanitize_code(raw_llm, theorem_decl)
-                full_test_code = (context_code + "\n\n" + candidate_code).strip() if context_code else candidate_code
+                if context_code:
+                    clean_candidate = "\n".join(
+                        l for l in candidate_code.splitlines()
+                        if not l.strip().startswith("import ")
+                        and not l.strip().startswith("set_option ")
+                        and not l.strip().startswith("open scoped ")
+                    ).strip()
+                    full_test_code = context_code.strip() + "\n\n" + clean_candidate
+                else:
+                    full_test_code = candidate_code
 
                 # Level 1 Verification (REPL in ~50ms)
                 print(f"  ⚡ Test rapide via LeanREPL...")
