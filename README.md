@@ -4,6 +4,20 @@ Environnement autonome de formalisation mathématique en **Lean 4 + Mathlib** et
 
 ---
 
+## 💡 En Bref : Le Projet Expliqué Simplement
+
+> **En une phrase :** Un **robot mathématicien** qui résout des problèmes complexes avec l'interdiction absolue de se tromper ou d'inventer des réponses.
+
+### Comment ça marche en 5 étapes simples :
+
+1. **Le casse-tête** : On lui soumet un problème de mathématiques exigeant (type concours ou olympiades).
+2. **La boîte à outils** : Il consulte une vaste bibliothèque de mathématiques formelles pour identifier les règles et théorèmes déjà connus pouvant servir d'appui.
+3. **L'élève qui réfléchit (l'IA)** : Un modèle de langage élabore une démonstration logique étape par étape.
+4. **Le juge intraitable (zéro triche, zéro erreur)** : Contrairement aux IA généralistes qui peuvent inventer des résultats avec assurance, la copie passe devant un **correcteur formel ultra-strict** (le compilateur Lean 4). À la moindre faille ou raccourci logique, la tentative est immédiatement rejetée et l'IA doit corriger sa copie en tenant compte du retour du compilateur.
+5. **La remise de la copie certifiée** : Dès que la démonstration est validée comme **100 % indiscutable et sans aucune faille**, le système prépare automatiquement un kit complet, prêt à être relu et signé par un mathématicien humain.
+
+---
+
 ## 🏗 Architecture Hybride Local / Prod
 
 - **Local (Ce repo sur votre machine) :** Développement de l'agent, rédaction des problèmes (`problems/`), prise de notes de recherche (`notes/`), pilotage IA.
