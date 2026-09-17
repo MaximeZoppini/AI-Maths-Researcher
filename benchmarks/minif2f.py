@@ -30,14 +30,13 @@ def fetch_minif2f_test() -> str:
 
 def parse_theorems(content: str) -> List[Tuple[str, str]]:
     """
-    Parses theorem declarations (name, full_declaration_statement).
+    Parses all 244 theorem declarations (name, full_declaration_statement) from MiniF2F test set.
     """
-    pattern = r"(theorem\s+([a-zA-Z0-9_]+)[\s\S]*?:=\s*by\s*\n\s*sorry)"
-    matches = re.findall(pattern, content)
-    
     results = []
-    for full, name in matches:
-        stmt_part = full.split(":=")[0].strip()
+    pattern = r"(?:^|\n)(theorem\s+([a-zA-Z0-9_]+)(?:(?!theorem)[\s\S])*?)(?::=)"
+    for m in re.finditer(pattern, content):
+        stmt_part = m.group(1).strip()
+        name = m.group(2).strip()
         results.append((name, stmt_part))
     return results
 
@@ -57,17 +56,11 @@ def run_benchmark(
     pass_k: int = 1,
     skip_solved: bool = False,
     workers: int = 1,
-    min_balance: float = 0.50
+    min_balance: float = 0.50,
+    dry_run: bool = False
 ):
-    # 0. Garde-fou Solde API initial
+    # 0. Récupération du solde API
     bal = get_deepseek_balance()
-    if bal is not None:
-        print(f"💳 Solde DeepSeek vérifié : ${bal:.2f} USD")
-        if bal < min_balance:
-            print(f"🛑 Solde insuffisant (${bal:.2f} < seuil minimal ${min_balance:.2f}). Campagne annulée.")
-            return
-    else:
-        print("ℹ️ Clé DeepSeek non configurée ou solde non consultable.")
 
     content = fetch_minif2f_test()
     theorems = parse_theorems(content)
@@ -86,12 +79,54 @@ def run_benchmark(
         for name, decl in selected:
             out_file = Path("problems") / f"minif2f_{name}.lean"
             if out_file.exists():
-                print(f"⏩ [Skip] '{name}' déjà résolu et certifié ({out_file.name}).")
-            else:
                 filtered.append((name, decl))
-        selected = filtered
+        # Log des déjà résolus
+        already_solved = [t[0] for t in selected if (Path("problems") / f"minif2f_{t[0]}.lean").exists()]
+        selected = [t for t in selected if t[0] not in already_solved]
+        if already_solved:
+            print(f"⏩ [Skip] {len(already_solved)} problème(s) déjà résolu(s) et certifié(s) dans problems/.")
 
     total_problems = len(selected)
+
+    # Calcul économique pré-campagne
+    db = AttemptsDB()
+    with db.conn:
+        row = db.conn.execute("""
+            SELECT COALESCE(SUM(cost_usd), 0.0), COUNT(DISTINCT problem_name)
+            FROM attempts
+            WHERE problem_name NOT LIKE '%_step%'
+        """).fetchone()
+        tot_cost_db, tot_probs_db = row[0], row[1]
+        avg_cost = (tot_cost_db / tot_probs_db) if tot_probs_db > 0 else 0.035
+
+    estimated_cost = total_problems * avg_cost
+    required_balance = estimated_cost + min_balance
+    bal_float = bal if bal is not None else 0.0
+    can_run = (bal is not None and bal_float >= required_balance)
+
+    print("\n" + "=" * 65)
+    print("📊 ANALYSE PRÉALABLE DU BUDGET & DES RESSOURCES (PRE-FLIGHT)")
+    print("=" * 65)
+    print(f"Problèmes au total dans le set test : {len(theorems)}")
+    print(f"Problèmes restant à évaluer        : {total_problems}")
+    print(f"Coût moyen par problème mesuré en base : ${avg_cost:.4f} USD")
+    print(f"Coût estimé pour cette campagne    : ${estimated_cost:.2f} USD")
+    print(f"Solde DeepSeek disponible          : ${bal_float:.2f} USD")
+    print(f"Seuil de sécurité requis           : ${required_balance:.2f} USD (estimation + ${min_balance:.2f})")
+    status_label = "✅ GO (Solde suffisant pour couvrir la campagne complète)" if can_run else f"🛑 NO-GO (Solde insuffisant: ${bal_float:.2f} < ${required_balance:.2f})"
+    print(f"Décision Pré-Vol                   : {status_label}")
+    print("=" * 65)
+
+    if dry_run:
+        print("\n🔍 Mode --dry-run : simulation pré-vol terminée avec succès.")
+        print("   AUCUN appel LLM ni calcul REPL n'a été effectué.\n")
+        return
+
+    if not can_run:
+        print(f"\n🛑 Campagne interrompue : solde disponible (${bal_float:.2f}) inférieur au requis (${required_balance:.2f}).")
+        print("💡 Rechargez votre compte DeepSeek (recommandation: top-up de $10 à $15 pour le run 244 complet).\n")
+        return
+
     print("\n" + "=" * 65)
     print(f"🏁 Démarrage du Benchmark MiniF2F Lean 4 ({total_problems} problèmes)")
     print(f"Modèle : {model} | Essais max : {attempts} | pass@{pass_k} | Workers : {workers}")
@@ -233,6 +268,7 @@ def main():
     parser.add_argument("--skip-solved", action="store_true", help="Ignorer les problèmes déjà résolus")
     parser.add_argument("--workers", type=int, default=1, help="Nombre de workers parallèles (default: 1)")
     parser.add_argument("--min-balance", type=float, default=0.50, help="Solde minimal DeepSeek USD requis (default: 0.50)")
+    parser.add_argument("--dry-run", action="store_true", help="Vérifier les problèmes, estimer les coûts et le solde sans appel LLM")
     args = parser.parse_args()
 
     run_benchmark(
@@ -244,7 +280,8 @@ def main():
         pass_k=args.pass_k,
         skip_solved=args.skip_solved,
         workers=args.workers,
-        min_balance=args.min_balance
+        min_balance=args.min_balance,
+        dry_run=args.dry_run
     )
 
 if __name__ == "__main__":

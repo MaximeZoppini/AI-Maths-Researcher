@@ -24,11 +24,20 @@ def rank_targets(
         print(f"⚠️ Aucune cible trouvée dans {registry_path}")
         return
 
+    verified_targets = [t for t in targets if t.verified]
+    unverified_count = len(targets) - len(verified_targets)
+    if unverified_count > 0:
+        print(f"ℹ️ {unverified_count} cible(s) non vérifiée(s) ignorée(s) (verified: false requiert validation humaine).")
+
+    if not verified_targets:
+        print("⚠️ Aucune cible vérifiée (verified: true) à classer.")
+        return
+
     db = AttemptsDB()
     class_stats = db.get_success_rates_by_class()
 
     ranked = []
-    for t in targets:
+    for t in verified_targets:
         # 1. p_success empirique par classe
         cls_data = class_stats.get(t.difficulty_class)
         if cls_data and cls_data.get("attempted", 0) >= 3:

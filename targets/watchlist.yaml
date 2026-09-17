@@ -1,0 +1,6 @@
+# WATCHLIST DES SOURCES APPROUVÉES (targets/watchlist.yaml)
+# Livré VIDE par défaut avec un exemple commenté. C'est l'utilisateur qui le remplit manuellement.
+# Format:
+# - repo: leanprover-community/mathlib4
+#   labels: ["help-wanted"]
+#   kind_hint: mathlib

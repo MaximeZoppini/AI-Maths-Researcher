@@ -1,71 +1,58 @@
-# REGISTRE DES CIBLES OFFICIELLES (AI-Maths-Researcher)
-# Sourcing manuel vérifié. Chaque entrée correspond à une exigence réelle.
-
 - name: mathd_algebra_392
+  statement: |
+    theorem mathd_algebra_392 (n : ℕ) (h₀ : Even n)
+    (h₁ : (↑n - 2) ^ 2 + ↑n ^ 2 + (↑n + 2) ^ 2 = (12296 : ℤ)) :
+    (↑n - 2) * ↑n * (↑n + 2) / 8 = (32736 : ℤ) := by
+    sorry
   kind: benchmark
   value_usd: 0.0
   difficulty_class: mathd
-  deadline: 2026-12-31
-  source_url: https://github.com/google-deepmind/miniF2F
-  submission: Auto-certification MiniF2F Test
-  statement: |
-    theorem mathd_algebra_392
-      (n : ℕ)
-      (h₀ : n = 2) :
-      (n : ℝ) * (n + 1) * (n + 2) = 24 := by
-      sorry
-
-- name: mathlib_nat_mul_self_parity
-  kind: mathlib
-  value_usd: 10.0
-  difficulty_class: mathd
-  deadline: 2026-12-31
-  source_url: https://github.com/leanprover-community/mathlib4
-  submission: PR sur leanprover-community/mathlib4, conventions snake_case, licence Apache-2.0
-  statement: |
-    theorem nat_even_iff_sq_even (n : ℕ) : Even (n * n) ↔ Even n := by
-      sorry
-
+  deadline: None
+  source_url: https://raw.githubusercontent.com/google-deepmind/miniF2F/main/MiniF2F/Test.lean
+  submission: MiniF2F Test benchmark
+  verified: true
 - name: amc12a_2021_p8
+  statement: |
+    theorem amc12a_2021_p8 (d : ℕ → ℕ) (h₀ : d 0 = 0) (h₁ : d 1 = 0) (h₂ : d 2 = 1)
+    (h₃ : ∀ n ≥ 3, d n = d (n - 1) + d (n - 3)) : Even (d 2021) ∧ Odd (d 2022) ∧ Even (d 2023) := by
+    sorry
   kind: benchmark
   value_usd: 0.0
   difficulty_class: amc
-  deadline: 2026-12-31
-  source_url: https://github.com/google-deepmind/miniF2F
-  submission: MiniF2F Test
-  statement: |
-    theorem amc12a_2021_p8
-      (d : ℕ → ℕ)
-      (h₀ : ∀ n, d n = 0) :
-      d 1 = 0 := by
-      sorry
-
-- name: aime_1984_p7
+  deadline: None
+  source_url: https://raw.githubusercontent.com/google-deepmind/miniF2F/main/MiniF2F/Test.lean
+  submission: MiniF2F Test benchmark
+  verified: true
+- name: draft_external_candidate_example
+  statement: -- Brouillon en attente de validation humaine
   kind: bounty
-  value_usd: 150.0
-  difficulty_class: aime
-  deadline: 2026-10-31
+  value_usd: 0.0
+  difficulty_class: unknown
+  deadline: None
   source_url: https://github.com/leanprover-community/mathlib4
-  submission: Solution certifiée sans axiomes exotiques
+  submission: En attente de vérification humaine et de formalisation
+  verified: false
+- name: issue_leanprover-community_mathlib4_43872
   statement: |
-    theorem aime_1984_p7
-      (f : ℕ → ℕ)
-      (h₀ : ∀ n, f (n + 1) = f n + 1)
-      (h₁ : f 1 = 1) :
-      f 100 = 100 := by
-      sorry
-
-- name: imo_shortlist_algebra_candidate
-  kind: bounty
-  value_usd: 500.0
-  difficulty_class: imo
-  deadline: 2026-12-31
-  source_url: https://github.com/leanprover-community/mathlib4
-  submission: Preuve formelle complète sans sorry, audit LXC
+    -- Source: https://github.com/leanprover-community/mathlib4/issues/43872
+    -- Titre: Improve `Multipliable.inv` / `inv₀` docstrings for `ℂ` (and add `tprod_one_add_ne_zero_of_summable` cross-reference
+    -- En attente de formulation Lean et validation humaine
+  kind: mathlib
+  value_usd: 0.0
+  difficulty_class: unknown
+  deadline: None
+  source_url: https://github.com/leanprover-community/mathlib4/issues/43872
+  submission: Issue #43872: Improve `Multipliable.inv` / `inv₀` docstrings for `ℂ` (and add `tprod_one_add_ne_zero_of_summable` cross-reference
+  verified: false
+- name: issue_leanprover-community_mathlib4_43870
   statement: |
-    theorem imo_shortlist_algebra_candidate
-      (a b : ℝ)
-      (h₀ : a > 0)
-      (h₁ : b > 0) :
-      a / b + b / a ≥ 2 := by
-      sorry
+    -- Source: https://github.com/leanprover-community/mathlib4/issues/43870
+    -- Titre: Subscript and superscript parsers should produce round-tripping `Syntax`
+    -- En attente de formulation Lean et validation humaine
+  kind: mathlib
+  value_usd: 0.0
+  difficulty_class: unknown
+  deadline: None
+  source_url: https://github.com/leanprover-community/mathlib4/issues/43870
+  submission: Issue #43870: Subscript and superscript parsers should produce round-tripping `Syntax`
+  verified: false

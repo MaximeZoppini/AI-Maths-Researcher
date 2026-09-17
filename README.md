@@ -19,6 +19,20 @@ Environnement autonome de formalisation mathématique en **Lean 4 + Mathlib** et
 
 ---
 
+## 📊 Résultats & Métrique Officielle
+
+- **Métrique Officielle MiniF2F Test** : **17/30 problèmes distincts des 30 premiers du set MiniF2F test (57 %)**.
+- **Protocole & Configuration de référence** :
+  - **Modèle de base** : `deepseek-chat` (itérations 1-2) avec escalade sur `deepseek-reasoner` (itérations 3+).
+  - **Sampling** : `pass@2` à températures étagées (0.1 et 0.4).
+  - **Tentatives max** : 3 tentatives par problème.
+  - **Décomposition** : `BlueprintPlanner` activé (plan NL + décomposition en lemmes formels).
+  - **Environnement** : Lean 4 `v4.34.0`, Mathlib4 commit `5ed2965256430c3649e86755f9576b54eca72435`.
+  - **Certification** : Audit formel `#print axioms` sans sorry sur conteneur LXC 200.
+  - **Date** : 2026-09-17.
+
+---
+
 ## 🧮 Problèmes Résolus & Vérifiés en Prod (`problems/`)
 
 Tous les problèmes ci-dessous sont **formellement prouvés, sans `sorry` ni `axiom`**, et validés directement par le compilateur Lean 4 sur l'infrastructure de production :

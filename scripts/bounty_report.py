@@ -98,8 +98,7 @@ def generate_report():
         "",
         "| Métrique | Valeur |",
         "| :--- | :--- |",
-        f"| 🎯 **Métrique Officielle MiniF2F Test** | **{len(minif2f_solved)} / {len(minif2f_base)}** ({minif2f_rate:.1f}%) |",
-        f"| **Problèmes Uniques Résolus (Total)** | **{len(solved_base)} / {len(base_problems)}** ({len(solved_base)/max(1, len(base_problems))*100:.1f}%) |",
+        f"| 🎯 **Métrique Officielle MiniF2F Test (Set Figé)** | **{len(minif2f_solved)} / {len(minif2f_base)}** ({minif2f_rate:.1f}%) |",
         f"| **Sous-Lemmes Décomposés & Résolus** | **{len(solved_sub_lemmas)} / {len(sub_lemmas)}** |",
         f"| **Nombre Total de Tentatives** | **{total_attempts}** |",
         f"| **Temps Moyen par Tentative (REPL)** | **{avg_duration:.1f} ms** |",
@@ -142,11 +141,12 @@ def generate_report():
     ])
 
     for prob_name, iters, model, dur, cost, code, ts in solved_details:
+        clean_ts = ts.split(".")[0].replace("T", " ") if ts else ""
         report_lines.extend([
             f"### 🎯 Théorème : `{prob_name}`",
             f"- **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**",
             f"- **Modèle** : `{model}` | **Itération** : {iters} | **Latence REPL** : {dur:.1f} ms | **Coût** : ${cost:.5f}",
-            f"- **Timestamp** : `{ts}`",
+            f"- **Timestamp** : `{clean_ts}`",
             "",
             "```lean",
             code.strip(),

@@ -17,9 +17,15 @@ class Target:
     deadline: Optional[str] = None
     source_url: Optional[str] = None
     submission: Optional[str] = None       # Format / repo cible / instructions
+    verified: bool = False                 # Requis : true uniquement si vérifié manuellement ou issu du dataset
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Target":
+        raw_v = d.get("verified", False)
+        if isinstance(raw_v, str):
+            is_verified = raw_v.strip().lower() in ("true", "1", "yes")
+        else:
+            is_verified = bool(raw_v)
         return cls(
             name=d["name"],
             statement=d["statement"],
@@ -28,7 +34,8 @@ class Target:
             difficulty_class=d.get("difficulty_class", "unknown"),
             deadline=d.get("deadline"),
             source_url=d.get("source_url"),
-            submission=d.get("submission")
+            submission=d.get("submission"),
+            verified=is_verified
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -40,7 +47,8 @@ class Target:
             "difficulty_class": self.difficulty_class,
             "deadline": self.deadline,
             "source_url": self.source_url,
-            "submission": self.submission
+            "submission": self.submission,
+            "verified": "true" if self.verified else "false"
         }
 
 def config_for(target: Target, p_success: float) -> ProverConfig:

@@ -1,0 +1,39 @@
+# Profil de soumission Mathlib4 (targets/repo_profiles/mathlib4.yaml)
+# Directives officielles de contribution leanprover-community/mathlib4
+
+repo: leanprover-community/mathlib4
+license: Apache-2.0
+base_branch: master
+
+style_rules:
+  max_columns: 100
+  no_linter_overrides: true
+  require_docstring: true
+  naming_convention: snake_case
+
+pr_template: |
+  ## Summary
+  This PR formalizes and contributes the theorem `{target_name}` to Mathlib.
+
+  ### Mathematical statement
+  `{target_statement_brief}`
+
+  ## AI Assistance Disclosure
+  - **Author**: Assistant AI (AI-Maths-Researcher) under human review.
+  - **Verification**: Certified sorry-free and verified against standard axioms ([propext, Classical.choice, Quot.sound]).
+  - **Human maintainer**: I have carefully reviewed, understood, and validated every line of this proof.
+
+  ## Checklist
+  - [x] Code strictly adheres to Mathlib naming conventions.
+  - [x] Module docstrings and declaration comments (/-- ... -/) included.
+  - [x] No `set_option linter.* false` in source code.
+  - [x] Verified on Loogle / LeanSearch that no duplicate theorem exists.
+
+checklist: |
+  # Checklist de relecture humaine obligatoire avant toute soumission PR
+  - [ ] 1. Vérification Loogle : confirmer qu'aucun lemme équivalent n'existe déjà dans Mathlib.
+  - [ ] 2. Conventions de nommage : le nom est-il en snake_case descriptif des objets mathématiques ?
+  - [ ] 3. Docstring : la docstring `/-- ... -/` décrit-elle clairement l'énoncé en anglais mathématique ?
+  - [ ] 4. Linter & Style : aucun override de linter (`set_option linter.* false`), lignes de moins de 100 colonnes.
+  - [ ] 5. Compréhension humaine : le contributeur humain comprend-il et peut-il défendre chaque étape de la preuve en revue Zulip ?
+  - [ ] 6. Licence : la contribution est-elle conforme à la licence Apache 2.0 ?

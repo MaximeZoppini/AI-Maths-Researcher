@@ -1,6 +1,6 @@
 # 🏆 AI-Maths-Researcher — Rapport Officiel de Certification & Bounties
 
-> **Généré le** : `2026-09-17 14:31:34 UTC`  
+> **Généré le** : `2026-09-17 14:44:45 UTC`  
 > **Infra de Vérification** : LXC Container 200 (Proxmox 100.90.108.89)  
 > **Lean 4 / Mathlib** : `v4.34.0` | **Axiomes Admis** : `[propext, Classical.choice, Quot.sound]` (Strict Zero-Sorry)
 
@@ -10,8 +10,7 @@
 
 | Métrique | Valeur |
 | :--- | :--- |
-| 🎯 **Métrique Officielle MiniF2F Test** | **18 / 35** (51.4%) |
-| **Problèmes Uniques Résolus (Total)** | **21 / 38** (55.3%) |
+| 🎯 **Métrique Officielle MiniF2F Test (Set Figé)** | **18 / 35** (51.4%) |
 | **Sous-Lemmes Décomposés & Résolus** | **9 / 19** |
 | **Nombre Total de Tentatives** | **258** |
 | **Temps Moyen par Tentative (REPL)** | **805.6 ms** |
@@ -47,7 +46,7 @@
 ### 🎯 Théorème : `AutoNatCancel`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `gemini-2.5-flash` | **Itération** : 2 | **Latence REPL** : 45.1 ms | **Coût** : $0.00000
-- **Timestamp** : `2026-09-17T11:49:08.874625+00:00`
+- **Timestamp** : `2026-09-17 11:49:08`
 
 ```lean
 import Mathlib.Tactic
@@ -62,7 +61,7 @@ theorem nat_add_sub_cancel (n m : ℕ) : (n + m) - m = n := by
 ### 🎯 Théorème : `aime_1983_p1`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 2 | **Latence REPL** : 2099.2 ms | **Coût** : $0.00056
-- **Timestamp** : `2026-09-17T12:50:27.605746+00:00`
+- **Timestamp** : `2026-09-17 12:50:27`
 
 ```lean
 import Mathlib.Analysis.SpecialFunctions.Log.Basic
@@ -118,7 +117,7 @@ theorem aime_1983_p1 (x y z w : ℕ) (ht : 1 < x ∧ 1 < y ∧ 1 < z) (hw : 0 �
 ### 🎯 Théorème : `algebra_sqineq_unitcircatbpabsamblt1`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-reasoner` | **Itération** : 3 | **Latence REPL** : 1251.5 ms | **Coût** : $0.01665
-- **Timestamp** : `2026-09-17T13:43:03.821247+00:00`
+- **Timestamp** : `2026-09-17 13:43:03`
 
 ```lean
 import Mathlib.Tactic
@@ -152,7 +151,7 @@ theorem algebra_sqineq_unitcircatbpabsamblt1 (a b : ℝ) (h₀ : a ^ 2 + b ^ 2 =
 ### 🎯 Théorème : `amc12b_2020_p2`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 69.5 ms | **Coût** : $0.00006
-- **Timestamp** : `2026-09-17T12:55:20.482965+00:00`
+- **Timestamp** : `2026-09-17 12:55:20`
 
 ```lean
 import Mathlib.Tactic
@@ -167,7 +166,7 @@ theorem amc12b_2020_p2 :
 ### 🎯 Théorème : `amc12b_2021_p3_amc12b_2021_p3_step1`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-reasoner` | **Itération** : 3 | **Latence REPL** : 347.7 ms | **Coût** : $0.00919
-- **Timestamp** : `2026-09-17T13:41:48.630541+00:00`
+- **Timestamp** : `2026-09-17 13:41:48`
 
 ```lean
 import Mathlib.Tactic
@@ -194,7 +193,7 @@ lemma amc12b_2021_p3_step1 (x : ℝ)
 ### 🎯 Théorème : `amc12b_2021_p3_amc12b_2021_p3_step2`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 494.5 ms | **Coût** : $0.00019
-- **Timestamp** : `2026-09-17T13:41:55.744688+00:00`
+- **Timestamp** : `2026-09-17 13:41:55`
 
 ```lean
 import Mathlib.Tactic
@@ -235,7 +234,7 @@ lemma amc12b_2021_p3_step2 (x : ℝ)
 ### 🎯 Théorème : `imo_1960_p2_imo_1960_p2_step1`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-reasoner` | **Itération** : 3 | **Latence REPL** : 225.6 ms | **Coût** : $0.01428
-- **Timestamp** : `2026-09-17T13:52:47.383449+00:00`
+- **Timestamp** : `2026-09-17 13:52:47`
 
 ```lean
 import Mathlib.Tactic
@@ -271,7 +270,7 @@ lemma imo_1960_p2_step1 (x : ℝ) (hx : 0 ≤ 1 + 2 * x) :
 ### 🎯 Théorème : `imo_1963_p5_imo_1963_p5_step1`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 305.4 ms | **Coût** : $0.00018
-- **Timestamp** : `2026-09-17T14:01:58.414107+00:00`
+- **Timestamp** : `2026-09-17 14:01:58`
 
 ```lean
 import Mathlib.Tactic
@@ -296,7 +295,7 @@ lemma imo_1963_p5_step1 (c : ℝ)
 ### 🎯 Théorème : `imo_1963_p5_imo_1963_p5_step2`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-reasoner` | **Itération** : 3 | **Latence REPL** : 1432.3 ms | **Coût** : $0.02980
-- **Timestamp** : `2026-09-17T14:03:01.863104+00:00`
+- **Timestamp** : `2026-09-17 14:03:01`
 
 ```lean
 import Mathlib.Tactic
@@ -376,7 +375,7 @@ lemma imo_1963_p5_step2 :
 ### 🎯 Théorème : `mathd_algebra_137`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 521.8 ms | **Coût** : $0.00014
-- **Timestamp** : `2026-09-17T14:10:22.307810+00:00`
+- **Timestamp** : `2026-09-17 14:10:22`
 
 ```lean
 import Mathlib.Tactic
@@ -398,7 +397,7 @@ theorem mathd_algebra_137 (x : ℕ) (h₀ : ↑x + (4 : ℝ) / (100 : ℝ) * ↑
 ### 🎯 Théorème : `mathd_algebra_141`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 333.7 ms | **Coût** : $0.00007
-- **Timestamp** : `2026-09-17T12:51:26.548918+00:00`
+- **Timestamp** : `2026-09-17 12:51:26`
 
 ```lean
 import Mathlib.Tactic
@@ -415,7 +414,7 @@ theorem mathd_algebra_141 (a b : ℝ) (h₁ : a * b = 180) (h₂ : 2 * (a + b) =
 ### 🎯 Théorème : `mathd_algebra_209`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 3 | **Latence REPL** : 42.3 ms | **Coût** : $0.00021
-- **Timestamp** : `2026-09-17T12:52:42.809695+00:00`
+- **Timestamp** : `2026-09-17 12:52:42`
 
 ```lean
 import Mathlib.Tactic
@@ -435,7 +434,7 @@ theorem mathd_algebra_209 (σ : ℝ ≃ ℝ) (h₀ : σ.symm 2 = 10) (h₁ : σ.
 ### 🎯 Théorème : `mathd_algebra_33`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 353.0 ms | **Coût** : $0.00010
-- **Timestamp** : `2026-09-17T12:54:19.482033+00:00`
+- **Timestamp** : `2026-09-17 12:54:19`
 
 ```lean
 import Mathlib.Tactic
@@ -464,7 +463,7 @@ theorem mathd_algebra_33 (x y z : ℝ) (h₀ : x ≠ 0) (h₁ : 2 * x = 5 * y) (
 ### 🎯 Théorème : `mathd_algebra_398`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 242.2 ms | **Coût** : $0.00024
-- **Timestamp** : `2026-09-17T13:59:59.800064+00:00`
+- **Timestamp** : `2026-09-17 13:59:59`
 
 ```lean
 import Mathlib.Tactic
@@ -480,7 +479,7 @@ theorem mathd_algebra_398 (a b c : ℝ) (h₀ : 0 < a ∧ 0 < b ∧ 0 < c) (h₁
 ### 🎯 Théorème : `mathd_algebra_419`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 39.6 ms | **Coût** : $0.00006
-- **Timestamp** : `2026-09-17T12:56:55.382997+00:00`
+- **Timestamp** : `2026-09-17 12:56:55`
 
 ```lean
 import Mathlib.Tactic
@@ -495,7 +494,7 @@ theorem mathd_algebra_419 (a b : ℝ) (h₀ : a = -1) (h₁ : b = 5) : -a - b ^ 
 ### 🎯 Théorème : `mathd_algebra_459`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-reasoner` | **Itération** : 3 | **Latence REPL** : 507.2 ms | **Coût** : $0.00934
-- **Timestamp** : `2026-09-17T14:04:54.409016+00:00`
+- **Timestamp** : `2026-09-17 14:04:54`
 
 ```lean
 import Mathlib.Data.Rat.Lemmas
@@ -514,7 +513,7 @@ theorem mathd_algebra_459 (a b c d : ℚ) (h₀ : 3 * a = b + c + d) (h₁ : 4 *
 ### 🎯 Théorème : `mathd_algebra_478`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `gemini-2.5-flash` | **Itération** : 1 | **Latence REPL** : 59.9 ms | **Coût** : $0.00000
-- **Timestamp** : `2026-09-17T11:51:20.614446+00:00`
+- **Timestamp** : `2026-09-17 11:51:20`
 
 ```lean
 import Mathlib.Tactic
@@ -531,7 +530,7 @@ theorem mathd_algebra_478 (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁
 ### 🎯 Théorème : `mathd_numbertheory_1124`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-reasoner` | **Itération** : 3 | **Latence REPL** : 66.5 ms | **Coût** : $0.00547
-- **Timestamp** : `2026-09-17T13:37:48.435622+00:00`
+- **Timestamp** : `2026-09-17 13:37:48`
 
 ```lean
 import Mathlib.Tactic
@@ -545,7 +544,7 @@ theorem mathd_numbertheory_1124 (n : ℕ) (h₀ : n ≤ 9) (h₁ : 18 ∣ 374 * 
 ### 🎯 Théorème : `mathd_numbertheory_1124_mathd_numbertheory_1124_step1`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 159.7 ms | **Coût** : $0.00010
-- **Timestamp** : `2026-09-17T12:53:08.812634+00:00`
+- **Timestamp** : `2026-09-17 12:53:08`
 
 ```lean
 import Mathlib.Tactic
@@ -572,7 +571,7 @@ lemma mathd_numbertheory_1124_step1 (n : ℕ) (h : 18 ∣ 374 * 10 + n) :
 ### 🎯 Théorème : `mathd_numbertheory_1124_mathd_numbertheory_1124_step2`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 400.8 ms | **Coût** : $0.00022
-- **Timestamp** : `2026-09-17T12:53:18.699852+00:00`
+- **Timestamp** : `2026-09-17 12:53:18`
 
 ```lean
 import Mathlib.Tactic
@@ -616,7 +615,7 @@ lemma mathd_numbertheory_1124_step2 (n : ℕ) (h₀ : n ≤ 9) (h : 18 ∣ 14 + 
 ### 🎯 Théorème : `mathd_numbertheory_237`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 1191.0 ms | **Coût** : $0.00011
-- **Timestamp** : `2026-09-17T12:54:09.486196+00:00`
+- **Timestamp** : `2026-09-17 12:54:09`
 
 ```lean
 import Mathlib.Tactic
@@ -629,7 +628,7 @@ theorem mathd_numbertheory_237 : (∑ k ∈ Finset.range 101, k) % 6 = 4 := by
 ### 🎯 Théorème : `mathd_numbertheory_299`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 47.1 ms | **Coût** : $0.00009
-- **Timestamp** : `2026-09-17T12:55:11.256340+00:00`
+- **Timestamp** : `2026-09-17 12:55:11`
 
 ```lean
 import Mathlib.Tactic
@@ -642,7 +641,7 @@ theorem mathd_numbertheory_299 : 1 * 3 * 5 * 7 * 9 * 11 * 13 % 10 = 5 := by
 ### 🎯 Théorème : `mathd_numbertheory_3`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 60.8 ms | **Coût** : $0.00012
-- **Timestamp** : `2026-09-17T12:51:36.060966+00:00`
+- **Timestamp** : `2026-09-17 12:51:36`
 
 ```lean
 import Mathlib.Data.Nat.ModEq
@@ -656,7 +655,7 @@ theorem mathd_numbertheory_3 : (∑ x ∈ Finset.range 10, (x + 1) ^ 2) % 10 = 5
 ### 🎯 Théorème : `mathd_numbertheory_427_mathd_numbertheory_427_step1`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 29.9 ms | **Coût** : $0.00011
-- **Timestamp** : `2026-09-17T13:55:49.919017+00:00`
+- **Timestamp** : `2026-09-17 13:55:49`
 
 ```lean
 import Mathlib.Tactic
@@ -677,7 +676,7 @@ lemma mathd_numbertheory_427_step1 :
 ### 🎯 Théorème : `mathd_numbertheory_427_mathd_numbertheory_427_step2`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 49.1 ms | **Coût** : $0.00015
-- **Timestamp** : `2026-09-17T13:55:56.718883+00:00`
+- **Timestamp** : `2026-09-17 13:55:56`
 
 ```lean
 import Mathlib.Tactic
@@ -707,7 +706,7 @@ lemma mathd_numbertheory_427_step2 (a : ℕ) (ha : a = 1092) :
 ### 🎯 Théorème : `mathd_numbertheory_430`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 3679.9 ms | **Coût** : $0.00045
-- **Timestamp** : `2026-09-17T14:04:23.658601+00:00`
+- **Timestamp** : `2026-09-17 14:04:23`
 
 ```lean
 import Mathlib.Data.Nat.Digits.Div
@@ -764,7 +763,7 @@ theorem mathd_numbertheory_430 (a b c : ℕ) (h₀ : 1 ≤ a ∧ a ≤ 9) (h₁ 
 ### 🎯 Théorème : `mean_calc`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 250.3 ms | **Coût** : $0.00009
-- **Timestamp** : `2026-09-17T12:46:29.257791+00:00`
+- **Timestamp** : `2026-09-17 12:46:29`
 
 ```lean
 import Mathlib.Tactic
@@ -793,7 +792,7 @@ theorem solve_y_from_mean (x y : ℝ) (h₁ : (x + y) / 2 = 10) (h₂ : x = 4) :
 ### 🎯 Théorème : `mean_calc_solve_y_from_mean_aux`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 116.6 ms | **Coût** : $0.00008
-- **Timestamp** : `2026-09-17T12:46:23.990819+00:00`
+- **Timestamp** : `2026-09-17 12:46:23`
 
 ```lean
 import Mathlib.Tactic
@@ -814,7 +813,7 @@ lemma solve_y_from_mean_aux (x y : ℝ) (h₁ : (x + y) / 2 = 10) (h₂ : x = 4)
 ### 🎯 Théorème : `numbertheory_4x3m7y3neq2003_zmod7_cube_ne_two`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-chat` | **Itération** : 1 | **Latence REPL** : 118.1 ms | **Coût** : $0.00015
-- **Timestamp** : `2026-09-17T13:30:53.712428+00:00`
+- **Timestamp** : `2026-09-17 13:30:53`
 
 ```lean
 import Mathlib.Tactic
@@ -834,7 +833,7 @@ lemma zmod7_cube_ne_two (z : ZMod 7) : z ^ 3 ≠ 2 := by
 ### 🎯 Théorème : `numbertheory_x5neqy2p4`
 - **Statut** : ✅ **Vérifié 'Sorry-Free' & Axiomes Valides**
 - **Modèle** : `deepseek-reasoner` | **Itération** : 3 | **Latence REPL** : 182.1 ms | **Coût** : $0.02782
-- **Timestamp** : `2026-09-17T13:57:35.693799+00:00`
+- **Timestamp** : `2026-09-17 13:57:35`
 
 ```lean
 import Mathlib.Tactic

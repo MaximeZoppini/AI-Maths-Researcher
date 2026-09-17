@@ -88,6 +88,15 @@ def run_daemon(
             print(f"🛑 GATE 3 DÉCLENCHÉE : Plafond session de ${max_session_cost_usd:.2f} atteint. Arrêt propre.")
             break
 
+        # Watcher whitelisté (throttlé 24h par défaut)
+        try:
+            from agent.watcher import check_watchlist
+            new_watched = check_watchlist()
+            if new_watched:
+                print(f"👀 Watcher : {len(new_watched)} nouvelle(s) cible(s) en attente de validation ajoutée(s) au registre.")
+        except Exception as e:
+            print(f"⚠️ Erreur watcher : {e}")
+
         # GATE 4: File d'attente non vide
         if not QUEUE_PATH.exists():
             print(f"ℹ️ Aucun fichier de file {QUEUE_PATH}.")
@@ -106,8 +115,24 @@ def run_daemon(
             time.sleep(interval_sec)
             continue
 
-        # Extraire la première cible prioritaire
-        current_target = queue[0]
+        # Filtrer les cibles vérifiées
+        verified_queue = [t for t in queue if t.verified]
+        unverified_in_queue = [t for t in queue if not t.verified]
+        if unverified_in_queue:
+            print(f"⚠️ [Sauté] {len(unverified_in_queue)} cible(s) non vérifiée(s) ignorée(s) (ex: '{unverified_in_queue[0].name}', verified: false).")
+            print("   RÈGLE ABSOLUE : Seul l'utilisateur passe 'verified: true' à la main. Le daemon ne les traite pas.")
+
+        if not verified_queue:
+            print("💤 Aucune cible vérifiée dans la file d'attente.")
+            if run_once:
+                print("🏁 Mode --once : fin d'exécution du daemon.")
+                break
+            print(f"En attente de validation humaine ({interval_sec}s)...")
+            time.sleep(interval_sec)
+            continue
+
+        # Extraire la première cible vérifiée prioritaire
+        current_target = verified_queue[0]
         print("\n" + "-" * 70)
         print(f"🎯 Prise en charge de la cible : '{current_target.name}'")
         print(f"Type : {current_target.kind} | Classe : {current_target.difficulty_class} | Valeur : ${current_target.value_usd}")
