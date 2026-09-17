@@ -103,8 +103,15 @@ def generate_report():
             ""
         ])
 
-    OUTPUT_FILE.write_text("\n".join(report_lines), encoding="utf-8")
-    print(f"✨ Rapport généré avec succès dans {OUTPUT_FILE}")
+    content = "\n".join(report_lines)
+    try:
+        OUTPUT_FILE.write_text(content, encoding="utf-8")
+        print(f"✨ Rapport généré avec succès dans {OUTPUT_FILE}")
+    except PermissionError:
+        tmp_target = Path("/tmp/ai_maths_data/BOUNTY_REPORT.md")
+        tmp_target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_target.write_text(content, encoding="utf-8")
+        print(f"⚠️ Permissions restreintes : rapport généré dans {tmp_target}")
 
 if __name__ == "__main__":
     generate_report()

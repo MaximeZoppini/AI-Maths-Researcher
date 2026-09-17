@@ -1,196 +1,138 @@
-# VISION — De la plomberie au programme de résolution de bounties
+# VISION v2 — Bilan des Phases 0-4 et cap sur l'industrialisation
 
 > Objectif : transformer AI-Maths-Researcher en un système capable de résoudre des problèmes
 > de niveau olympiade/recherche en Lean 4, avec des métriques honnêtes à chaque étape.
-> Dernière mise à jour : 2026-09-17.
+> Dernière mise à jour : 2026-09-17 (v2 — après implémentation des Phases 0 à 4).
 
 ---
 
-## 1. Constat de départ
+## 1. État des lieux honnête (v2)
 
-**Ce qui existe (l'échafaudage) :** infra LXC avec Mathlib précompilé, connecteur SSH,
-audit anti-`sorry`, déploiement Git automatisé. Étapes 3, 6, 7, 8 du pipeline.
+Les 4 phases de la v1 sont **implémentées et fonctionnelles**. Ce qui existe maintenant :
 
-**Ce qui manque (le cerveau) :** la boucle de preuve IA (étape 5), la décomposition en
-lemmes (étape 4), l'autoformalisation (étape 2). Aujourd'hui il n'y a **aucun appel LLM
-dans le code** — l'agent, c'est un humain qui pilote un modèle à la main.
+| Composant | Fichier | État |
+| :--- | :--- | :--- |
+| REPL Lean persistant (~50-700 ms/tentative) | `agent/repl_client.py` | ✅ opérationnel |
+| Boucle génère→compile→répare + budget + coûts | `agent/prover.py` | ✅ opérationnel |
+| Retrieval Loogle | `agent/retrieval.py` | ⚠️ rudimentaire (patterns codés en dur) |
+| Base SQLite des tentatives | `agent/db.py` | ⚠️ stockée dans `/tmp` (volatile !) |
+| Blueprint Planner (plan NL → squelette → lemmes) | `agent/planner.py` | ✅ opérationnel, assemblage à nettoyer |
+| Autoformalisation triple garde-fou | `agent/autoformalizer.py` | ✅ opérationnel, juge = même modèle (biais) |
+| Prouveur équationnel (magmas, style Tao) | `agent/equational.py` | ✅ preuve de concept validée |
+| Rapport de certification | `scripts/bounty_report.py` | ⚠️ doublons non dédupliqués |
 
-**Le principe directeur reste le bon et ne change pas :**
-le LLM propose, le compilateur Lean dispose. Aucune confiance dans le texte généré,
-confiance totale dans le vérificateur.
+### Le chiffre qui compte (mesuré, pas estimé)
 
----
+**MiniF2F : 10/16 problèmes distincts résolus (~62 %)** avec `deepseek-chat`, 3 tentatives max,
+coût total < $0.04. Résolus : aime_1983_p1, amc12b_2020_p2, mathd_algebra_{33,141,209,419,478},
+mathd_numbertheory_{3,237,299}. Échecs : amc12_2001_p5, amc12a_2020_p10, amc12b_2021_p3,
+algebra_sqineq_unitcircatbpabsamblt1, mathd_numbertheory_1124, numbertheory_4x3m7y3neq2003.
 
-## 2. Architecture cible
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        ORCHESTRATEUR (Python)                    │
-│  file d'attente de problèmes · budget/coût · traces · métriques  │
-└──────┬──────────────┬───────────────┬───────────────┬───────────┘
-       │              │               │               │
-┌──────▼─────┐ ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────────┐
-│ AUTOFORMA- │ │ PLANIFICA-  │ │  BOUCLE DE  │ │   RETRIEVAL     │
-│ LISATION   │ │ TEUR        │ │  PREUVE     │ │ (prémisses)     │
-│ énoncé →   │ │ problème →  │ │ génère →    │ │ loogle /        │
-│ theorem …  │ │ DAG de      │ │ compile →   │ │ LeanSearch /    │
-│ := sorry   │ │ lemmes      │ │ répare      │ │ exact? local    │
-└──────┬─────┘ └──────┬──────┘ └──────┬──────┘ └─────────────────┘
-       │              │               │
-┌──────▼──────────────▼───────────────▼──────────────────────────┐
-│              COUCHE DE VÉRIFICATION (2 niveaux)                 │
-│  Niveau 1 — ITÉRATION : Lean REPL persistant, Mathlib chargé    │
-│             en mémoire, feedback en ~1-3 s par tentative        │
-│  Niveau 2 — JUGE FINAL : LXC prod, `lake env lean` + audit      │
-│             `#print axioms` (seuls admis : propext,             │
-│             Classical.choice, Quot.sound)                       │
-└─────────────────────────────────────────────────────────────────┘
-       │
-┌──────▼──────────────────────────────────────────────────────────┐
-│  BASE DE TENTATIVES (SQLite) : problème, prompt, sortie modèle,  │
-│  erreurs compilateur, itérations, coût, succès/échec             │
-│  → c'est elle qui répond à "mes modèles sont-ils intelligents ?" │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### 2.1 La pièce maîtresse : le REPL Lean persistant
-
-Le goulot d'étranglement actuel est le cycle de feedback : un aller-retour SSH +
-`lake env lean` = 30 à 60 s par tentative. Une boucle de preuve sérieuse fait des
-**centaines** de tentatives par problème. À 45 s la tentative, c'est mort.
-
-Solution : [leanprover-community/repl](https://github.com/leanprover-community/repl)
-(ou Pantograph) tournant en daemon sur le LXC, Mathlib importé **une fois** en mémoire.
-Chaque tentative devient un échange JSON en ~1-3 s, avec en prime l'état des buts
-(*goal state*) après chaque tactique — exactement ce qu'il faut rétro-injecter dans
-le prompt.
-
-- Le SSH direct actuel (`verifier.py`) reste le **juge final** avant tout commit :
-  fichier complet, compilation propre, audit d'axiomes. Défense en profondeur.
-- Le REPL est l'outil d'**itération**. Ne jamais soumettre sur la seule foi du REPL.
-
-### 2.2 La boucle de preuve (étape 5, enfin codée)
-
-Deux stratégies existent dans la littérature ; on commence par la moins chère :
-
-**A. Génération de preuve entière + réparation (à faire en premier)**
-```
-prompt(énoncé + prémisses retrouvées + erreurs précédentes)
-  → le modèle écrit la preuve complète
-  → REPL compile
-  → succès ? fini. échec ? erreurs + goal state réinjectés, on recommence
-  → k tentatives en parallèle (pass@k), température variée
-```
-C'est simple, ça exploite bien les modèles frontier, et c'est l'état de l'art
-"économique" (~30-50 % sur miniF2F avec un bon modèle et k modeste).
-
-**B. Recherche arborescente au niveau tactique (plus tard, si besoin)**
-Best-first search sur l'arbre des états de but, le modèle propose des tactiques
-candidates à chaque nœud. Plus puissant, beaucoup plus coûteux. À n'ajouter que
-quand la stratégie A plafonne et que la base de tentatives le prouve.
-
-**Règles de la boucle :**
-- Budget explicite par problème (nb de tentatives, tokens, euros). Tout est loggé.
-- Rétro-injection structurée : message d'erreur + goal state + extrait de la doc
-  de la tactique fautive, pas juste "ça ne compile pas".
-- `sorry` autorisé **pendant** la recherche (pour valider un squelette de preuve
-  lemme par lemme), interdit à la soumission.
-
-### 2.3 Retrieval de prémisses (le multiplicateur silencieux)
-
-La moitié des échecs LLM en Lean, c'est un nom de lemme Mathlib halluciné.
-Avant chaque génération :
-- interroger **loogle** (recherche par signature de type) et **LeanSearch/moogle**
-  (recherche sémantique) avec l'énoncé,
-- injecter les 10-20 signatures pertinentes dans le prompt,
-- en réparation, si l'erreur est `unknown identifier`, relancer un retrieval ciblé.
-
-### 2.4 Planificateur (étape 4)
-
-Pour tout problème non trivial : le modèle produit d'abord un **plan en langage
-naturel**, puis un squelette Lean où chaque étape est un lemme `:= sorry`. Le
-squelette doit compiler (avec les sorry) **avant** qu'on attaque les lemmes un par
-un via la boucle 2.2. C'est le workflow *blueprint* des grands projets de
-formalisation (FLT, PFR de Tao), et ça transforme un problème insoluble en n
-sous-problèmes attaquables.
-
-### 2.5 Autoformalisation (étape 2) — avec garde-fou
-
-Le danger mortel du bounty : **prouver un énoncé qui n'est pas le bon**. Validation
-en trois temps :
-1. l'énoncé formalisé compile (types + hypothèses),
-2. **round-trip** : un second appel LLM (contexte vierge) retraduit le Lean en
-   langage naturel ; un juge compare à l'énoncé d'origine,
-3. test de non-vacuité : tenter de prouver la **négation** ou vérifier que les
-   hypothèses ne sont pas contradictoires (sinon tout est prouvable).
+**Mise en garde d'honnêteté** : cet échantillon est le début (facile) du fichier Test —
+dominé par les `mathd_*` (niveau MATH dataset). Le chiffre de référence à publier sera
+le score sur les **244 problèmes complets** du test set. Attendu réaliste avec l'escalade
+de modèle : 40-55 %. Les échecs actuels (AMC/AIME durs, théorie des nombres non triviale)
+sont exactement là où le système doit progresser.
 
 ---
 
-## 3. Roadmap par phases — chaque phase a une métrique de sortie
+## 2. Les 8 chantiers de la Phase 5 — Fiabilisation & Industrialisation
 
-### Phase 0 — Assainir les fondations (quelques jours)
-- [ ] Corriger `verifier.py` : `escaped_code` calculé mais jamais utilisé, parsing
-      `"error:" in combined` fragile → passer le code par stdin/scp plutôt que par
-      heredoc dans une commande quotée.
-- [ ] Remplacer l'audit `grep sorry|axiom` par un vrai audit `#print axioms <thm>`
-      généré automatiquement pour chaque théorème de `problems/`.
-- [ ] Installer le REPL Lean sur le LXC, le wrapper en daemon, écrire le client
-      Python (`agent/repl_client.py`).
-- **Sortie mesurable :** temps de feedback < 5 s par tentative.
+Classés par ratio impact/effort. Les 4 premiers sont des correctifs, les 4 suivants des leviers.
 
-### Phase 1 — La boucle de preuve minimale (1-2 semaines)
-- [ ] `agent/prover.py` : boucle génère→compile→répare (stratégie A), appels API
-      (modèle frontier), pass@k parallèle, budget par problème.
-- [ ] Base SQLite des tentatives + un script de stats (taux de succès, itérations
-      moyennes, coût par preuve).
-- [ ] Retrieval loogle/LeanSearch intégré au prompt.
-- **Sortie mesurable :** taux de résolution sur **50 problèmes de miniF2F-test**.
-  C'est le vrai test d'intelligence des modèles. Attendu : 30-50 %. En dessous de
-  20 %, c'est la boucle qui est mauvaise, pas le modèle.
+### 5.1 ⚠️ CRITIQUE — Sortir la base SQLite de `/tmp`
+`DB_PATH = /tmp/ai_maths_data/attempts.db` : **toutes les données de campagne disparaissent
+au reboot**. Déplacer vers `data/attempts.db` dans le repo (gitignoré) + backup automatique.
+C'est la matière première du projet ; la perdre = refaire toutes les campagnes.
 
-### Phase 2 — Planification et décomposition (2-4 semaines)
-- [ ] Mode blueprint : plan NL → squelette Lean avec `sorry` → résolution lemme
-      par lemme → assemblage → juge final.
-- [ ] Réattaquer les échecs de la Phase 1 avec ce mode.
-- **Sortie mesurable :** gain de points sur miniF2F vs Phase 1 ; premiers problèmes
-  niveau AMC12/AIME résolus de bout en bout.
+### 5.2 Timeout sur le REPL
+`send_request()` fait des `readline()` bloquants sans timeout. Une tactique qui diverge
+(`nlinarith` sur un but trop gros, `decide` sur un terme géant) **gèle toute la campagne**.
+Le paramètre `timeout_per_attempt_sec` existe dans `ProverConfig` mais n'est jamais utilisé.
+Fix : lecture avec timeout (select/thread), kill + restart du REPL en cas de blocage,
+l'échec-timeout devient un diagnostic réinjecté ("tactic X timed out, try another approach").
 
-### Phase 3 — Autoformalisation vérifiée (en parallèle de la Phase 2)
-- [ ] Pipeline énoncé texte → Lean avec le triple garde-fou (compile, round-trip,
-      non-vacuité).
-- **Sortie mesurable :** sur 20 énoncés connus dont la formalisation Mathlib existe,
-  ≥ 18 formalisations jugées équivalentes.
+### 5.3 Cohérence REPL ↔ Juge Prod (faux négatifs d'imports)
+`check_code()` supprime tous les `import` et s'appuie sur le préchargement fixe
+(`Mathlib.Tactic` + 3 modules). Une preuve nécessitant un module hors préchargement
+(ex. `Mathlib.Analysis.SpecialFunctions.Log.Basic`) risque d'échouer en REPL alors
+qu'elle passerait en prod → candidats valides jetés. Fix : précharger `import Mathlib`
+entier dans le warmup (coût mémoire unique au démarrage, le LXC tient).
+Le juge prod reste l'autorité finale — ça ne change pas.
 
-### Phase 4 — Cibles réelles, par ordre de difficulté croissante
-1. **PRs Mathlib** : lemmes manquants découverts en Phase 1-2 (le retrieval qui
-   échoue est un détecteur de trous dans Mathlib). Une PR acceptée = crédibilité
-   réelle, atteignable en quelques mois.
-2. **Bounties d'écosystème** : projets type Equational Theories — des milliers de
-   petites implications à prouver, format idéal pour un système automatisé.
-3. **Compétitions/benchmarks** : PutnamBench, problèmes récents d'olympiades.
-4. **Bounties à gros chèque / problèmes ouverts** : seulement quand les niveaux
-   1-3 sont validés par des résultats. Pas avant.
+### 5.4 Métriques propres + rapport dédupliqué
+- `stats.py` mélange problèmes, sous-lemmes (`*_step1`) et doublons → "15/31 résolus" ne
+  veut rien dire ; le vrai chiffre est 10/16 distincts. Séparer : campagnes benchmark
+  (set figé, pass@k, problèmes distincts) vs tentatives libres.
+- `bounty_report.py` : dédupliquer (mathd_algebra_478 y figure 5 fois) — garder la
+  meilleure preuve par théorème. Un rapport de certification avec des doublons décrédibilise.
+- Enregistrer le coût Gemini réel (actuellement $0.0000).
 
----
+### 5.5 Escalade de modèles (voir §3)
+Tentatives 1-2 : `deepseek-chat` (rapide, quasi gratuit). Échec → tentatives 3+ :
+`deepseek-reasoner` (raisonnement profond, bien meilleur sur AMC/AIME durs).
+Juge round-trip : **un modèle différent** du formaliseur (ex. Gemini) pour tuer le
+biais d'auto-validation.
 
-## 4. Principes non négociables
+### 5.6 Retrieval sérieux (le levier le plus sous-exploité)
+Le retrieval actuel = 3 patterns codés en dur + 2 mots-clés. Remplacer par :
+- **LeanSearch** (recherche sémantique, API publique) avec l'énoncé complet,
+- Loogle avec des requêtes construites depuis le **goal state** (pas l'énoncé),
+- en réparation d'`unknown identifier`, requête ciblée sur l'identifiant halluciné,
+- tactique `exact?`/`apply?` exécutée dans le REPL comme oracle de prémisses.
 
-1. **Jamais de métrique au doigt mouillé.** Un claim de capacité = un chiffre sur
-   un benchmark public reproductible.
-2. **Le REPL itère, la prod juge.** Aucune soumission sans compilation complète
-   fichier + audit `#print axioms` sur le LXC.
-3. **Tout est tracé.** Chaque tentative en base, coût compris. C'est la matière
-   première pour améliorer les prompts et choisir les modèles.
-4. **L'échelle avant le sommet.** miniF2F → Mathlib PR → bounties d'écosystème →
-   gros bounties. Sauter un barreau = temps perdu, pas du temps gagné.
-5. **Un énoncé mal formalisé vaut zéro.** Le round-trip d'autoformalisation n'est
-   pas optionnel.
+### 5.7 Parallélisme pass@k réel
+La boucle actuelle est séquentielle (répare l'historique). Ajouter le tir parallèle :
+k générations indépendantes à températures variées sur le même prompt, premier succès
+gagne. Combiner : vague parallèle → si tout échoue, boucle de réparation sur le
+meilleur candidat (celui avec le moins d'erreurs).
+
+### 5.8 Campagne complète MiniF2F 244 + PutnamBench
+Le chiffre de référence public. Puis PutnamBench (niveau supérieur) pour mesurer le
+plafond réel. Chaque campagne = un tag git + un rapport figé dans `reports/`.
 
 ---
 
-## 5. Coûts et ordres de grandeur (à affiner avec les données de la Phase 1)
+## 3. Stratégie modèles (DeepSeek en API)
 
-- Une preuve miniF2F facile : quelques centimes à ~1 € (pass@k modeste).
-- Un problème AIME dur en mode blueprint : 1-10 € selon la profondeur.
-- La base de tentatives dira vite quel modèle a le meilleur rapport
-  preuves/euro — c'est un des buts explicites du projet.
+| Usage | Modèle | Pourquoi |
+| :--- | :--- | :--- |
+| Tentatives 1-2 (proof direct) | `deepseek-chat` | ~$0.0001/preuve facile, latence faible ; résout déjà les mathd_* en 1 coup |
+| Escalade (échecs, AMC/AIME+) | `deepseek-reasoner` | Chain-of-thought long, écart massif sur les problèmes de compétition ; coût toujours négligeable à notre échelle |
+| Plan NL du Blueprint | `deepseek-reasoner` | La qualité du plan conditionne tout le reste |
+| Rétro-traduction round-trip | `deepseek-chat` | Tâche de traduction simple |
+| Juge d'équivalence round-trip | **Gemini** (ou autre fournisseur) | Jamais le même modèle qui formalise ET juge |
+
+Notes d'implémentation `deepseek-reasoner` : ignorer `temperature` (non supporté en mode
+raisonnement), prévoir `max_tokens` large (le raisonnement est verbeux), extraire le
+contenu final hors bloc de raisonnement, timeout HTTP à 120 s et non 30 s.
+
+Horizon suivant : les modèles **spécialisés Lean** (DeepSeek-Prover-V2, Kimina-Prover)
+dominent miniF2F (>80 %) mais ne sont pas sur l'API officielle DeepSeek — poids ouverts
+via hébergeurs tiers ou GPU local. À évaluer quand 5.1-5.7 seront faits : le harnais
+(REPL + retrieval + blueprint) est exactement ce qu'il faut pour les exploiter.
+
+---
+
+## 4. Cibles réelles (mise à jour)
+
+1. **PRs Mathlib** — inchangé, toujours la meilleure crédibilité/effort. Les échecs de
+   retrieval sont un détecteur de lemmes manquants.
+2. **Equational Theories** ⚠️ révision : le projet original de Tao est essentiellement
+   **terminé** (les ~4694 lois traitées). Ce n'est plus un bounty, c'est un **terrain
+   d'entraînement** parfait (le harnais `equational.py` reste précieux). Les vraies cibles :
+   bounties actifs de l'écosystème Lean (Zulip #bounties, prix de formalisation ouverts),
+   à sourcer et documenter dans `notes/`.
+3. **Benchmarks publics** — MiniF2F 244 complet, puis PutnamBench, scores publiés dans
+   le README avec méthodo reproductible.
+4. **Gros bounties / problèmes ouverts** — après des résultats sur 1-3.
+
+---
+
+## 5. Principes non négociables (inchangés)
+
+1. Jamais de métrique au doigt mouillé — set figé, problèmes distincts, pass@k explicite.
+2. Le REPL itère, la prod juge — aucune soumission sans `#print axioms` sur le LXC.
+3. Tout est tracé, coûts compris — et la base ne vit plus dans `/tmp`.
+4. L'échelle avant le sommet — miniF2F complet → PutnamBench → bounties.
+5. Un énoncé mal formalisé vaut zéro — le round-trip garde un juge indépendant.
