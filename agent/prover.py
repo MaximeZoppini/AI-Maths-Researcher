@@ -59,6 +59,28 @@ def is_deepseek_offpeak(dt: Optional[datetime.datetime] = None) -> bool:
     is_peak = (1 <= hour < 4) or (6 <= hour < 10)
     return not is_peak
 
+def get_next_offpeak_window_utc(dt: Optional[datetime.datetime] = None) -> datetime.datetime:
+    """
+    Retourne le datetime UTC de la prochaine ouverture de fenêtre creuse DeepSeek.
+    Si actuellement en heures creuses, retourne le moment actuel.
+    """
+    now = dt or datetime.datetime.now(datetime.timezone.utc)
+    if is_deepseek_offpeak(now):
+        return now
+    if 1 <= now.hour < 4:
+        return now.replace(hour=4, minute=0, second=0, microsecond=0)
+    elif 6 <= now.hour < 10:
+        return now.replace(hour=10, minute=0, second=0, microsecond=0)
+    return now
+
+def get_next_offpeak_window_str(dt: Optional[datetime.datetime] = None) -> str:
+    """Retourne une chaîne décrivant l'ouverture de la prochaine fenêtre creuse."""
+    now = dt or datetime.datetime.now(datetime.timezone.utc)
+    if is_deepseek_offpeak(now):
+        return "actuellement ouvert (-50%)"
+    next_dt = get_next_offpeak_window_utc(now)
+    return next_dt.strftime("%H:%M UTC")
+
 DEEPSEEK_MODEL_ALIASES = {
     "deepseek-chat": "deepseek-flash",
     "deepseek-reasoner": "deepseek-v4-pro"

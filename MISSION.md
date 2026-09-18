@@ -13,9 +13,13 @@
    l'identique depuis une source officielle vérifiable (fichier du dataset, repo officiel).
    Le registre actuel contient 5 entrées fabriquées présentées comme « vérifiées » —
    c'est exactement ce qui ne doit plus jamais se produire.
-2. **Toute cible externe porte un champ `verified: false` par défaut.** Seul l'utilisateur
-   le passe à `true` à la main. Le daemon et `rank_targets.py` IGNORENT toute entrée
-   non vérifiée.
+2. **Toute cible externe porte un champ `verified: false` par défaut.** La validation
+   humaine peut désormais passer par DEUX canaux : l'édition manuelle du YAML (inchangée)
+   OU une commande Telegram `/approve_<nom>` depuis le chat_id autorisé. Le système
+   lui-même ne peut toujours JAMAIS s'auto-valider. Et `value_usd` reste saisi à la main
+   dans le YAML — jamais déduit d'un titre d'issue ou d'une page web. Une cible approuvée
+   par Telegram sans montant renseigné garde `value_usd: 0` (budget économe). Le daemon
+   et `rank_targets.py` IGNORENT toute entrée non vérifiée.
 3. **Les énoncés de benchmark viennent du dataset, jamais réécrits.** Source unique :
    `benchmarks/minif2f_test.lean` (cache du repo officiel google-deepmind/miniF2F).
 4. **Aucune action externe automatique** : pas de PR hors de ce repo, pas de post,
@@ -358,6 +362,63 @@ Nouveau : `scripts/dashboard.py` → génère `reports/dashboard.html`
 - Le serveur écoute strictement sur l'IP Tailscale `100.90.108.89:8088` (vérifié par `ss -tulpn`).
 - Régénération automatique intégrée au démarrage du daemon, à chaque cycle et à chaque certification.
 - 13 tests unitaires et d'intégration validés.
+
+---
+
+## TÂCHE 13 (FINALE) — Boucle bounty complète : proposition → accord Telegram → résolution en heures creuses — ✅ TERMINÉE
+
+Objectif : quand le watcher détecte un problème à prime potentielle, Marcus le PROPOSE
+sur le téléphone ; rien ne se passe sans accord explicite ; une fois accordé, la
+résolution ne tourne QUE pendant les heures creuses DeepSeek (-50 %).
+
+### Amendement à la RÈGLE ABSOLUE 2 (reporté dans l'en-tête du fichier) [✅ APPLIQUÉ]
+La validation humaine passe par DEUX canaux : l'édition manuelle du YAML OU une
+commande Telegram `/approve_<nom>` depuis le chat_id autorisé. Le système ne s'auto-valide
+jamais. `value_usd` reste saisi à la main dans le YAML (0.0 par défaut).
+
+### 13.1 — Watcher : signal « bounty potentiel » [✅ IMPLÉMENTÉ]
+- Détection par mots-clés (`bounty`, `prize`, `reward`, `$`) → `bounty_hint: true` sur
+  la fiche brouillon. Montant préservé à `0.0` (aucun montant déduit).
+
+### 13.2 — Marcus : proposition et double validation [✅ IMPLÉMENTÉ]
+- Nouvelle fiche avec `bounty_hint: true` → notification SONORE (`notify_bounty_proposal`).
+- **Étape 1 `/approve_<nom>`** : passe `verified: true` + `offpeak_only: true` + `approval_stage: "approved"`.
+  Débloque UNIQUEMENT l'autoformalisation (~1 centime), PAS la preuve.
+- L'autoformaliseur (triple garde-fous : syntaxe LeanREPL, rétro-traduction neutre, non-vacuité)
+  produit l'énoncé. Marcus émet l'alerte sonore (`notify_formalization_result`) : énoncé formel,
+  rétro-traduction et score d'équivalence.
+- **Étape 2 `/confirm_<nom>`** : débloque la recherche de preuve lourde (`approval_stage: "confirmed"`).
+  `/reject_<nom>` rejette l'énoncé ; `/deny_<nom>` archive la cible.
+- Tout autre texte libre ou commande arbitraire : consigné et ignoré.
+
+### 13.3 — Daemon : exécution en heures creuses uniquement [✅ IMPLÉMENTÉ]
+- Cible avec `offpeak_only: true` ou `value_usd > 0` : traitée UNIQUEMENT si `is_deepseek_offpeak()`.
+  Hors fenêtre : loggée « différée jusqu'aux heures creuses », zéro dépense.
+- Flag global `--offpeak-only` : borne TOUTE dépense LLM du daemon aux heures creuses (-50%).
+- Dashboard et compte-rendu `/status` affichent : `« N cible(s) en attente de la prochaine fenêtre creuse (ouverture à HH:MM UTC) »`.
+
+### 13.4 — Persistance des états d'approbation [✅ IMPLÉMENTÉ]
+- Champs `bounty_hint`, `offpeak_only`, `approval_stage`, `approved_at`, `confirmed_at`, `natural_language`,
+  `round_trip_translation`, `round_trip_score` sérialisés et conservés dans le YAML via PyYAML.
+
+**Acceptation validée :**
+- Proposition sonore émise sur Telegram pour fiche avec `bounty_hint: true`.
+- `/approve` depuis chat_id autorisé lance l'autoformalisation seule ; énoncé + rétro-traduction reçus ; preuve bloquée jusqu'à `/confirm`.
+- `/approve` depuis mauvais chat_id ou en texte libre strictement ignoré.
+- Cible confirmée hors fenêtre creuse différée avec log explicite sans dépense.
+- Redémarrage du daemon : conservation intégrale de l'état d'approbation et des horodatages.
+- Dashboard calculé dynamiquement et déployé.
+- 20 tests unitaires et d'intégration validés (`tests/test_task13.py`, `tests/test_dashboard.py`, `tests/test_notifier.py`, `tests/test_integration_approval.py`).
+
+### 🚀 Checklist de lancement (après validation de la tâche 13)
+1. Top-up DeepSeek ~$10 (préflight de la 244 : ~$4.30 estimé + marge).
+2. Vérifier sur le LXC : `ss -tulpn | grep 8088` → écoute uniquement sur l'IP Tailscale.
+3. Test `/status` depuis le téléphone.
+4. Lancer la campagne 244 EN FENÊTRE CREUSE :
+   `python3 -B -m benchmarks.minif2f --limit 244 --attempts 3 --pass-k 2 --skip-solved`
+5. Publier la métrique officielle dans le README (elle bougera : c'est la vraie).
+6. Démarrer le daemon en mode continu avec `--offpeak-only`.
+7. Remplir la watchlist avec les premières sources réelles choisies à la main.
 
 ---
 

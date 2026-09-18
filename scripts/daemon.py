@@ -22,7 +22,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.db import AttemptsDB
 from agent.targets import Target, load_targets, save_targets, config_for
-from agent.prover import ProofSearchEngine, get_deepseek_balance
+from agent.prover import (
+    ProofSearchEngine,
+    get_deepseek_balance,
+    is_deepseek_offpeak,
+    get_next_offpeak_window_utc,
+    get_next_offpeak_window_str
+)
+from agent.autoformalizer import Autoformalizer
 from agent.planner import BlueprintPlanner
 from agent.verifier import RemoteProdVerifier
 from agent.notifier import TelegramNotifier
@@ -41,19 +48,6 @@ def safe_write_file(path: Path, content: str):
     except PermissionError:
         subprocess.run(["tee", str(path)], input=content, text=True, stdout=subprocess.DEVNULL, check=True)
 
-def is_deepseek_offpeak(dt: Optional[datetime.datetime] = None) -> bool:
-    """
-    Vérifie si le moment actuel correspond aux heures creuses DeepSeek (-50% sur les tokens) :
-    - Samedi et Dimanche : 100% en heures creuses (week-end entier).
-    - Lundi à Vendredi : Heures creuses en dehors des pics 01:00-04:00 UTC et 06:00-10:00 UTC.
-    """
-    now = dt or datetime.datetime.now(datetime.timezone.utc)
-    if now.weekday() in (5, 6):  # 5 = Samedi, 6 = Dimanche
-        return True
-    hour = now.hour
-    is_peak = (1 <= hour < 4) or (6 <= hour < 10)
-    return not is_peak
-
 def git_commit_proof(problem_name: str, cost: float):
     try:
         subprocess.run(["git", "add", "problems/", "targets/queue.yaml", "BOUNTY_REPORT.md", "submissions/"], cwd=str(ROOT_DIR), check=True)
@@ -69,6 +63,7 @@ def run_daemon(
     max_session_cost_usd: float = 5.00,
     daily_budget_usd: float = 0.30,
     prefer_offpeak: bool = False,
+    offpeak_only: bool = False,
     run_once: bool = False,
     auto_commit: bool = True,
     send_digest_now: bool = False
@@ -81,6 +76,8 @@ def run_daemon(
     print(f"Budget roulant 24h: ${daily_budget_usd:.2f} USD (garantie max ~$9/mois)")
     print(f"Kill-switch file : {STOP_FILE}")
     print(f"Mode Heures Creuses : {'ACTIF (-50%)' if is_deepseek_offpeak() else 'HEURES PLEINES'}")
+    if offpeak_only:
+        print("Restreint strictement aux Heures Creuses DeepSeek (--offpeak-only actif)")
     print("=" * 70 + "\n")
 
     db = AttemptsDB()
@@ -89,7 +86,14 @@ def run_daemon(
     notifier = TelegramNotifier()
     notified_gates = set()
     pending_approvals = set()
+    proposed_bounties = set()
     last_digest_day = ""
+
+    # Enregistrer les fiches déjà traitées pour éviter de notifier en boucle au boot
+    if REGISTRY_PATH.exists():
+        for t in load_targets(REGISTRY_PATH):
+            if getattr(t, "bounty_hint", False) and (t.verified or getattr(t, "approval_stage", "none") != "none"):
+                proposed_bounties.add(t.name)
 
     if send_digest_now:
         print("📊 Envoi immédiat du Digest quotidien Telegram demandé via CLI...")
@@ -158,9 +162,100 @@ def run_daemon(
             new_watched = check_watchlist()
             if new_watched:
                 print(f"👀 Watcher : {len(new_watched)} nouvelle(s) cible(s) en attente de validation ajoutée(s) au registre.")
+                # Notification sonore pour les cibles avec signal bounty potentiel (TÂCHE 13.2)
+                for nw in new_watched:
+                    if getattr(nw, "bounty_hint", False) and nw.name not in proposed_bounties:
+                        print(f"💰 [Signal Bounty] Envoi proposition sonore Telegram pour '{nw.name}'...")
+                        notifier.notify_bounty_proposal(
+                            target_name=nw.name,
+                            title=nw.submission or nw.name,
+                            repo=nw.source_url or "repo",
+                            url=nw.source_url or ""
+                        )
+                        proposed_bounties.add(nw.name)
                 notifier.notify_watcher_new_targets(new_watched)
         except Exception as e:
             print(f"⚠️ Erreur watcher : {e}")
+
+        # Traitement des commandes Telegram entrantes (/status, /approve, /confirm, /reject, /deny)
+        reg_targets = load_targets(REGISTRY_PATH) if REGISTRY_PATH.exists() else []
+        queue_targets = load_targets(QUEUE_PATH) if QUEUE_PATH.exists() else []
+
+        pending_approve_names = [t.name for t in reg_targets if getattr(t, "bounty_hint", False) and not t.verified and getattr(t, "approval_stage", "none") == "none"]
+        for p in pending_approvals:
+            if p not in pending_approve_names:
+                pending_approve_names.append(p)
+
+        pending_confirm_names = [t.name for t in queue_targets if getattr(t, "approval_stage", "none") == "approved" and getattr(t, "round_trip_translation", None)]
+
+        action_info = notifier.poll_approvals(
+            pending_approvals=pending_approve_names,
+            pending_confirms=pending_confirm_names
+        )
+        if action_info:
+            act = action_info.get("action")
+            tgt_name = action_info.get("target_name")
+            if act == "approve" and tgt_name:
+                print(f"🎉 Approbation reçue de Telegram pour '{tgt_name}' ! (verified: true, autoformalisation débloquée en heures creuses).")
+                for rt in reg_targets:
+                    if rt.name == tgt_name:
+                        rt.verified = True
+                        rt.offpeak_only = True
+                        rt.approval_stage = "approved"
+                        rt.budget_unlocked = True
+                        rt.approved_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                save_targets(REGISTRY_PATH, reg_targets)
+
+                # Assurer la présence de la cible dans queue.yaml
+                q_names = [t.name for t in queue_targets]
+                if tgt_name not in q_names:
+                    matched = [rt for rt in reg_targets if rt.name == tgt_name]
+                    if matched:
+                        queue_targets.append(matched[0])
+                        save_targets(QUEUE_PATH, queue_targets)
+                else:
+                    for qt in queue_targets:
+                        if qt.name == tgt_name:
+                            qt.verified = True
+                            qt.offpeak_only = True
+                            qt.approval_stage = "approved"
+                            qt.budget_unlocked = True
+                            qt.approved_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    save_targets(QUEUE_PATH, queue_targets)
+                pending_approvals.discard(tgt_name)
+
+            elif act == "confirm" and tgt_name:
+                print(f"🎉 Confirmation reçue de Telegram pour '{tgt_name}' ! Recherche de preuve débloquée en heures creuses.")
+                for qt in queue_targets:
+                    if qt.name == tgt_name:
+                        qt.approval_stage = "confirmed"
+                        qt.confirmed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                save_targets(QUEUE_PATH, queue_targets)
+                for rt in reg_targets:
+                    if rt.name == tgt_name:
+                        rt.approval_stage = "confirmed"
+                        rt.confirmed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                save_targets(REGISTRY_PATH, reg_targets)
+
+            elif act == "reject" and tgt_name:
+                print(f"❌ Rejet reçu pour l'énoncé de '{tgt_name}'.")
+                queue_targets = [qt for qt in queue_targets if qt.name != tgt_name]
+                save_targets(QUEUE_PATH, queue_targets)
+                for rt in reg_targets:
+                    if rt.name == tgt_name:
+                        rt.approval_stage = "rejected"
+                save_targets(REGISTRY_PATH, reg_targets)
+
+            elif act == "deny" and tgt_name:
+                print(f"❌ Refus/archivage reçu pour '{tgt_name}'.")
+                pending_approvals.discard(tgt_name)
+                queue_targets = [qt for qt in queue_targets if qt.name != tgt_name]
+                save_targets(QUEUE_PATH, queue_targets)
+                for rt in reg_targets:
+                    if rt.name == tgt_name:
+                        rt.verified = False
+                        rt.approval_stage = "denied"
+                save_targets(REGISTRY_PATH, reg_targets)
 
         # GATE 4: File d'attente non vide
         if not QUEUE_PATH.exists():
@@ -185,7 +280,7 @@ def run_daemon(
         unverified_in_queue = [t for t in queue if not t.verified]
         if unverified_in_queue:
             print(f"⚠️ [Sauté] {len(unverified_in_queue)} cible(s) non vérifiée(s) ignorée(s) (ex: '{unverified_in_queue[0].name}', verified: false).")
-            print("   RÈGLE ABSOLUE : Seul l'utilisateur passe 'verified: true' à la main. Le daemon ne les traite pas.")
+            print("   RÈGLE ABSOLUE : Seul l'utilisateur valide une cible (via YAML ou /approve). Le daemon ne les traite pas.")
 
         if not verified_queue:
             print("💤 Aucune cible vérifiée dans la file d'attente.")
@@ -200,8 +295,80 @@ def run_daemon(
         current_target = verified_queue[0]
         print("\n" + "-" * 70)
         print(f"🎯 Prise en charge de la cible : '{current_target.name}'")
-        print(f"Type : {current_target.kind} | Classe : {current_target.difficulty_class} | Valeur : ${current_target.value_usd}")
+        print(f"Type : {current_target.kind} | Classe : {current_target.difficulty_class} | Valeur : ${current_target.value_usd} | Étape : {current_target.approval_stage}")
         print("-" * 70)
+
+        # RÈGLE HEURES CREUSES DEEPSEEK (TÂCHE 13.3)
+        # Toute cible offpeak_only ou avec value_usd > 0, ou si le flag global --offpeak-only est activé
+        is_offpeak_needed = current_target.offpeak_only or (current_target.value_usd > 0) or offpeak_only
+        if is_offpeak_needed and not is_deepseek_offpeak():
+            next_win = get_next_offpeak_window_str()
+            print(f"⏳ [Offpeak Gate] Cible '{current_target.name}' différée jusqu'aux heures creuses DeepSeek (-50%). Prochaine ouverture à {next_win}.")
+            if run_once:
+                print("🏁 Mode --once : fin d'exécution du daemon (cible différée hors heures creuses).")
+                break
+            print(f"En attente de la fenêtre creuse ({interval_sec}s)...")
+            time.sleep(interval_sec)
+            continue
+
+        # PHASE 1 : AUTOFORMALISATION (TÂCHE 13.2)
+        # Déclenchée si la cible a été approuvée (approval_stage == 'approved') mais pas encore confirmée
+        if current_target.approval_stage == "approved":
+            if current_target.round_trip_translation:
+                print(f"⏳ Cible '{current_target.name}' formalisée en attente de confirmation Telegram (/confirm_{current_target.name} ou /reject_{current_target.name}).")
+                if run_once:
+                    print("🏁 Mode --once : fin d'exécution du daemon (énoncé en attente de confirmation).")
+                    break
+                time.sleep(interval_sec)
+                continue
+
+            print(f"\n📝 [Autoformalisation] Début de formalisation vérifiée pour '{current_target.name}'...")
+            problem_text = current_target.natural_language
+            if not problem_text:
+                lines = [l.strip("- ") for l in current_target.statement.splitlines() if "Titre:" in l or ("Source:" not in l and "En attente" not in l)]
+                problem_text = "\n".join(lines).strip() or current_target.submission or current_target.name
+
+            autoform = Autoformalizer()
+            res = autoform.formalize_problem(problem_text, theorem_name=current_target.name)
+            if res.is_valid:
+                print(f"🏆 Énoncé formalisé avec succès pour '{current_target.name}' (Score: {res.round_trip_score*100:.1f}%).")
+                current_target.statement = res.lean_statement + " := by\n  sorry"
+                current_target.round_trip_translation = res.round_trip_translation
+                current_target.round_trip_score = res.round_trip_score
+                save_targets(QUEUE_PATH, queue)
+
+                reg_all = load_targets(REGISTRY_PATH)
+                for rt in reg_all:
+                    if rt.name == current_target.name:
+                        rt.statement = current_target.statement
+                        rt.round_trip_translation = res.round_trip_translation
+                        rt.round_trip_score = res.round_trip_score
+                        rt.approval_stage = "approved"
+                save_targets(REGISTRY_PATH, reg_all)
+
+                print(f"🔔 Envoi de l'énoncé formalisé sur Telegram pour confirmation (/confirm_{current_target.name})...")
+                notifier.notify_formalization_result(
+                    target_name=current_target.name,
+                    lean_stmt=res.lean_statement,
+                    back_translation=res.round_trip_translation,
+                    score=res.round_trip_score
+                )
+            else:
+                print(f"❌ Échec de l'autoformalisation pour '{current_target.name}' : {res.error_message}")
+
+            if run_once:
+                print("🏁 Mode --once : fin d'exécution du daemon après tentative d'autoformalisation.")
+                break
+            time.sleep(interval_sec)
+            continue
+
+        # Si cible non-benchmark et statement non-Lean alors que pas approved/confirmed -> sauter
+        if current_target.kind != "benchmark" and not current_target.statement.strip().startswith(("theorem", "lemma")) and current_target.approval_stage not in ("approved", "confirmed"):
+            print(f"ℹ️ Cible '{current_target.name}' sans énoncé Lean et non approuvée. Sautée.")
+            if run_once:
+                break
+            time.sleep(interval_sec)
+            continue
 
         # Calcul de p_success empirique et configuration de recherche
         class_stats = db.get_success_rates_by_class()
@@ -381,6 +548,7 @@ def main():
     parser.add_argument("--max-cost", type=float, default=5.00, help="Plafond de dépense total de la session (default: 5.00)")
     parser.add_argument("--daily-budget", type=float, default=0.30, help="Plafond quotidien glissant de dépense API USD (default: 0.30)")
     parser.add_argument("--prefer-offpeak", action="store_true", help="Reporter les tâches Reasoner lourdes en heures creuses DeepSeek (-50%%)")
+    parser.add_argument("--offpeak-only", action="store_true", help="Restreindre TOUTE dépense LLM du daemon aux heures creuses DeepSeek (-50%%)")
     parser.add_argument("--once", action="store_true", help="Traiter un problème de la file puis s'arrêter")
     parser.add_argument("--no-commit", action="store_true", help="Désactiver le commit git automatique")
     parser.add_argument("--digest", action="store_true", help="Envoyer immédiatement le digest quotidien Telegram au démarrage")
@@ -392,6 +560,7 @@ def main():
         max_session_cost_usd=args.max_cost,
         daily_budget_usd=args.daily_budget,
         prefer_offpeak=args.prefer_offpeak,
+        offpeak_only=args.offpeak_only,
         run_once=args.once,
         auto_commit=not args.no_commit,
         send_digest_now=args.digest

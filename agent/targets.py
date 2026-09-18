@@ -19,6 +19,14 @@ class Target:
     submission: Optional[str] = None       # Format / repo cible / instructions
     verified: bool = False                 # Requis : true uniquement si vérifié manuellement ou issu du dataset
     budget_unlocked: bool = False          # Déblocage de budget explicite accordé via Telegram (/approve)
+    bounty_hint: bool = False              # Signal de bounty potentiel détecté par mots-clés
+    offpeak_only: bool = False             # Exécution réservée aux heures creuses DeepSeek (-50%)
+    approval_stage: str = "none"           # none -> approved -> confirmed | rejected | denied
+    approved_at: Optional[str] = None      # Horodatage ISO de l'approbation d'autoformalisation
+    confirmed_at: Optional[str] = None     # Horodatage ISO de la confirmation de recherche de preuve
+    natural_language: Optional[str] = None # Énoncé original en langage naturel
+    round_trip_translation: Optional[str] = None # Rétro-traduction Lean -> langage naturel
+    round_trip_score: Optional[float] = None     # Score d'équivalence sémantique (0.0 - 1.0)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Target":
@@ -32,17 +40,49 @@ class Target:
             is_unlocked = raw_b.strip().lower() in ("true", "1", "yes")
         else:
             is_unlocked = bool(raw_b)
+
+        raw_bh = d.get("bounty_hint", False)
+        if isinstance(raw_bh, str):
+            bounty_hint = raw_bh.strip().lower() in ("true", "1", "yes")
+        else:
+            bounty_hint = bool(raw_bh)
+
+        raw_val = float(d.get("value_usd", 0.0))
+        raw_op = d.get("offpeak_only", None)
+        if raw_op is not None:
+            if isinstance(raw_op, str):
+                offpeak_only = raw_op.strip().lower() in ("true", "1", "yes")
+            else:
+                offpeak_only = bool(raw_op)
+        else:
+            offpeak_only = (raw_val > 0)
+
+        approval_stage = str(d.get("approval_stage", "none")).strip().lower()
+        if approval_stage not in ("none", "approved", "confirmed", "rejected", "denied"):
+            approval_stage = "none"
+
+        raw_score = d.get("round_trip_score")
+        score = float(raw_score) if raw_score is not None else None
+
         return cls(
             name=d["name"],
             statement=d["statement"],
             kind=d.get("kind", "benchmark"),
-            value_usd=float(d.get("value_usd", 0.0)),
+            value_usd=raw_val,
             difficulty_class=d.get("difficulty_class", "unknown"),
             deadline=d.get("deadline"),
             source_url=d.get("source_url"),
             submission=d.get("submission"),
             verified=is_verified,
-            budget_unlocked=is_unlocked
+            budget_unlocked=is_unlocked,
+            bounty_hint=bounty_hint,
+            offpeak_only=offpeak_only,
+            approval_stage=approval_stage,
+            approved_at=d.get("approved_at"),
+            confirmed_at=d.get("confirmed_at"),
+            natural_language=d.get("natural_language"),
+            round_trip_translation=d.get("round_trip_translation"),
+            round_trip_score=score
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -59,6 +99,22 @@ class Target:
         }
         if self.budget_unlocked:
             d["budget_unlocked"] = True
+        if self.bounty_hint:
+            d["bounty_hint"] = True
+        if self.offpeak_only:
+            d["offpeak_only"] = True
+        if self.approval_stage and self.approval_stage != "none":
+            d["approval_stage"] = self.approval_stage
+        if self.approved_at:
+            d["approved_at"] = self.approved_at
+        if self.confirmed_at:
+            d["confirmed_at"] = self.confirmed_at
+        if self.natural_language:
+            d["natural_language"] = self.natural_language
+        if self.round_trip_translation:
+            d["round_trip_translation"] = self.round_trip_translation
+        if self.round_trip_score is not None:
+            d["round_trip_score"] = self.round_trip_score
         return d
 
 def config_for(target: Target, p_success: float) -> ProverConfig:

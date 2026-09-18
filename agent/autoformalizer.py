@@ -42,8 +42,8 @@ class Autoformalizer:
             self.judge_llm = LLMProvider(model="gemini-2.5-flash")
             self.judge_name = "gemini-2.5-flash"
         elif self.llm.deepseek_key:
-            self.judge_llm = LLMProvider(model="deepseek-reasoner")
-            self.judge_name = "deepseek-reasoner"
+            self.judge_llm = LLMProvider(model="deepseek-v4-pro")
+            self.judge_name = "deepseek-v4-pro"
         else:
             self.judge_llm = self.llm
             self.judge_name = self.config.model

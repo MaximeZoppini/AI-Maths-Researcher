@@ -18,7 +18,31 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from agent.db import AttemptsDB, classify_problem
 from agent.targets import load_targets, Target
-from agent.prover import get_deepseek_balance, is_deepseek_offpeak
+from agent.prover import get_deepseek_balance, is_deepseek_offpeak, get_next_offpeak_window_str
+from benchmarks.minif2f import fetch_minif2f_test, parse_theorems
+
+OFFICIAL_COHORT_SIZE = 30
+
+def compute_official_metric(db: AttemptsDB) -> tuple:
+    """
+    Métrique officielle reproductible : problèmes distincts résolus parmi
+    les OFFICIAL_COHORT_SIZE premiers théorèmes du set MiniF2F test figé
+    (source: benchmarks/minif2f_test.lean, jamais réécrit).
+    Calculée depuis la base à chaque génération — jamais codée en dur.
+    """
+    try:
+        content = fetch_minif2f_test()
+        cohort_names = {n for n, _ in parse_theorems(content)[:OFFICIAL_COHORT_SIZE]}
+    except Exception:
+        return (0, OFFICIAL_COHORT_SIZE, 0.0)
+
+    rows = db.conn.execute(
+        "SELECT problem_name, MAX(success) AS solved FROM attempts "
+        "WHERE problem_name NOT LIKE '%_step%' GROUP BY problem_name"
+    ).fetchall()
+    solved = sum(1 for r in rows if r["problem_name"] in cohort_names and r["solved"])
+    rate = (solved / OFFICIAL_COHORT_SIZE * 100) if OFFICIAL_COHORT_SIZE else 0.0
+    return (solved, OFFICIAL_COHORT_SIZE, rate)
 
 PROBLEMS_DIR = ROOT_DIR / "problems"
 TARGETS_DIR = ROOT_DIR / "targets"
@@ -171,6 +195,7 @@ def build_dashboard_html() -> str:
     summary = db.get_summary()
     class_stats = db.get_success_rates_by_class()
     rolling_24h_cost = db.get_rolling_cost_usd(24)
+    off_solved, off_total, off_rate = compute_official_metric(db)
 
     # 1. Analyse des théorèmes certifiés dans problems/
     certified_files = sorted(list(PROBLEMS_DIR.glob("*.lean")))
@@ -242,12 +267,15 @@ def build_dashboard_html() -> str:
     balance = get_deepseek_balance()
     bal_str = f"${balance:.2f} USD" if balance is not None else "N/A"
     offpeak_active = is_deepseek_offpeak()
+    next_window_str = get_next_offpeak_window_str()
 
     # 7. Cibles & Pipeline (registry.yaml & queue.yaml)
     reg_path = TARGETS_DIR / "registry.yaml"
     queue_path = TARGETS_DIR / "queue.yaml"
     registry_targets = load_targets(reg_path) if reg_path.exists() else []
     queue_targets = load_targets(queue_path) if queue_path.exists() else []
+
+    waiting_offpeak = [t for t in queue_targets if (t.offpeak_only or t.value_usd > 0) and t.verified and not offpeak_active]
 
     pipeline_items = []
     for t in registry_targets:
@@ -261,6 +289,9 @@ def build_dashboard_html() -> str:
             "class": t.difficulty_class,
             "value_usd": t.value_usd,
             "verified": t.verified,
+            "approval_stage": getattr(t, "approval_stage", "none"),
+            "bounty_hint": getattr(t, "bounty_hint", False),
+            "offpeak_only": getattr(t, "offpeak_only", False),
             "budget_unlocked": getattr(t, "budget_unlocked", False),
             "ev": ev,
             "in_queue": any(q.name == t.name for q in queue_targets)
@@ -384,13 +415,11 @@ def build_dashboard_html() -> str:
         <div class="banner">
             <div class="banner-metric">
                 <span class="label">Métrique Officielle MiniF2F Test :</span>
-                <span class="val">17 / 30 <span style="font-size: 1rem; color: var(--text-muted); font-weight: 500;">(56.7%)</span></span>
+                <span class="val">{off_solved} / {off_total} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 500;">({off_rate:.1f}%)</span></span>
             </div>
-            <div style="display: flex; gap: 10px; align-items: center;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                 <span class="badge badge-success">🏆 {certified_count} / {certified_count} Certifiés Zéro-Sorry</span>
-                <span class="badge {'badge-accent' if offpeak_active else 'badge-muted'}">
-                    {'🌙 Heures Creuses Actives (-50%)' if offpeak_active else '☀️ Heures Pleines'}
-                </span>
+                {f'<span class="badge badge-warning">⏳ {len(waiting_offpeak)} cible(s) en attente de la fenêtre creuse (ouverture à {next_window_str})</span>' if (not offpeak_active and len(waiting_offpeak) > 0) else f'<span class="badge {"badge-accent" if offpeak_active else "badge-muted"}">{"🌙 Heures Creuses Actives (-50%)" if offpeak_active else "☀️ Heures Pleines"}</span>'}
                 <span class="badge {'badge-danger' if stop_active else 'badge-success'}">
                     {'🛑 Kill-Switch STOP Actif' if stop_active else '🟢 Démon Actif'}
                 </span>
@@ -513,6 +542,7 @@ def build_dashboard_html() -> str:
                                 <th>Cible</th>
                                 <th>Classe</th>
                                 <th>Vérifiée</th>
+                                <th>Étape</th>
                                 <th>Prime (USD)</th>
                                 <th>EV Estimée</th>
                             </tr>
@@ -522,12 +552,25 @@ def build_dashboard_html() -> str:
 
     for item in pipeline_items:
         v_badge = '<span class="badge badge-success">VÉRIFIÉE</span>' if item["verified"] else '<span class="badge badge-warning">EN ATTENTE</span>'
+        st = item.get("approval_stage", "none")
+        if st == "confirmed":
+            st_badge = '<span class="badge badge-success">CONFIRMÉ (PREUVE)</span>'
+        elif st == "approved":
+            st_badge = '<span class="badge badge-accent">APPROUVÉ (~1¢)</span>'
+        elif st == "rejected":
+            st_badge = '<span class="badge badge-danger">REJETÉ</span>'
+        elif st == "denied":
+            st_badge = '<span class="badge badge-danger">REFUSÉ</span>'
+        else:
+            st_badge = '<span class="badge badge-muted">AUCUNE</span>'
+
         val_str = f"${item['value_usd']:.2f}" if item['value_usd'] > 0 else "$0.00"
         html += f"""
                             <tr>
                                 <td style="font-weight: 500; font-family: ui-monospace, monospace;">{item['name']}</td>
                                 <td><span class="badge badge-muted">{item['class']}</span></td>
                                 <td>{v_badge}</td>
+                                <td>{st_badge}</td>
                                 <td style="font-weight: 600;">{val_str}</td>
                                 <td>{item['ev']:+.2f}</td>
                             </tr>

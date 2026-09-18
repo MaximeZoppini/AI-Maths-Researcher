@@ -131,7 +131,7 @@ def check_watchlist(
         except Exception:
             pass
 
-    existing_targets = load_targets(REGISTRY_PATH)
+    existing_targets = load_targets(r_path)
     existing_urls = {t.source_url for t in existing_targets if t.source_url}
     existing_names = {t.name for t in existing_targets}
 
@@ -158,6 +158,16 @@ def check_watchlist(
             if slug_name in existing_names:
                 continue
 
+            # Détection de signal 'bounty potentiel' (TÂCHE 13.1)
+            # RÈGLE ABSOLUE : INTERDIT d'en déduire un montant. value_usd reste 0.0.
+            issue_labels = [l.get("name", "") if isinstance(l, dict) else str(l) for l in issue.get("labels", [])]
+            search_text = (title + " " + " ".join(issue_labels)).lower()
+            bounty_keywords = ["bounty", "prize", "reward", "$"]
+            has_bounty_hint = any(kw in search_text for kw in bounty_keywords)
+
+            body_text = issue.get("body") or ""
+            natural_text = f"{title}\n\n{body_text}".strip() if body_text else title
+
             # RÈGLE ABSOLUE : Donnée brute, verified: false, pas d'interprétation
             draft_target = Target(
                 name=slug_name,
@@ -168,7 +178,10 @@ def check_watchlist(
                 deadline=None,
                 source_url=html_url,
                 submission=f"Issue #{number}: {title}",
-                verified=False
+                verified=False,
+                bounty_hint=has_bounty_hint,
+                natural_language=natural_text,
+                approval_stage="none"
             )
 
             new_draft_targets.append(draft_target)
@@ -182,7 +195,7 @@ def check_watchlist(
     if new_draft_targets:
         print(f"📝 {len(new_draft_targets)} nouvelle(s) cible(s) brouillon ajoutée(s) au registre avec 'verified: false'.")
         updated_targets = existing_targets + new_draft_targets
-        save_targets(REGISTRY_PATH, updated_targets)
+        save_targets(r_path, updated_targets)
     else:
         print("✅ Aucune nouvelle issue détectée sur les sources surveillées.")
 

@@ -192,13 +192,23 @@ class TelegramNotifier:
                 pass
 
         bal_str = f"${balance:.2f} USD" if balance is not None else "N/A"
+        from agent.prover import is_deepseek_offpeak, get_next_offpeak_window_str
+        offpeak = is_deepseek_offpeak()
+        waiting_offpeak = [t for t in queue_targets if (getattr(t, "offpeak_only", False) or getattr(t, "value_usd", 0.0) > 0) and getattr(t, "verified", False)]
+        next_window_str = get_next_offpeak_window_str()
+        if not offpeak and waiting_offpeak:
+            offpeak_info = f"\n• *Heures creuses* : {len(waiting_offpeak)} cible(s) en attente (ouverture à {next_window_str})"
+        else:
+            offpeak_info = f"\n• *Tarification LLM* : {'🌙 Heures Creuses (-50%)' if offpeak else '☀️ Heures Pleines'}"
+
         msg = (
             f"📊 *Digest Quotidien AI-Maths-Researcher [{now_str}]*\n\n"
             f"• *Activité 24h* : {solved_24h} résolu(s), {failed_24h} échec(s)\n"
             f"• *Dépense 24h* : ${rolling_24h_cost:.4f} USD\n"
             f"• *Solde DeepSeek* : {bal_str}\n"
             f"• *Top cible EV* : {top_ev_text}\n"
-            f"• *File d'attente* : {len(queue_targets)} cible(s)\n"
+            f"• *File d'attente* : {len(queue_targets)} cible(s)"
+            f"{offpeak_info}\n"
             f"• *Dashboard privé (Tailscale)* : http://100.90.108.89:8088/dashboard.html"
         )
         return self.send_message(msg, silent=True)
@@ -206,7 +216,8 @@ class TelegramNotifier:
     def build_status_report(self) -> str:
         """Génère le mini compte-rendu textuel pour la commande /status du bot."""
         from agent.db import AttemptsDB
-        from agent.prover import get_deepseek_balance, is_deepseek_offpeak
+        from agent.targets import load_targets
+        from agent.prover import get_deepseek_balance, is_deepseek_offpeak, get_next_offpeak_window_str
 
         now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         certified_count = len(list((ROOT_DIR / "problems").glob("*.lean")))
@@ -219,6 +230,15 @@ class TelegramNotifier:
         offpeak = is_deepseek_offpeak()
         stop_active = (ROOT_DIR / "STOP").exists()
 
+        queue_path = ROOT_DIR / "targets" / "queue.yaml"
+        q_targets = load_targets(queue_path) if queue_path.exists() else []
+        waiting_offpeak = [t for t in q_targets if (t.offpeak_only or t.value_usd > 0) and t.verified]
+        next_window_str = get_next_offpeak_window_str()
+        if not offpeak and waiting_offpeak:
+            offpeak_info = f"• *Heures creuses* : {len(waiting_offpeak)} cible(s) en attente (ouverture à {next_window_str})\n"
+        else:
+            offpeak_info = f"• *Tarification LLM* : {'🌙 Heures Creuses (-50%)' if offpeak else '☀️ Heures Pleines'}\n"
+
         return (
             f"📊 *État Actuel — AI-Maths-Researcher [{now_str}]*\n\n"
             f"• *Métrique Officielle MiniF2F* : *17 / 30* (56.7%)\n"
@@ -226,11 +246,39 @@ class TelegramNotifier:
             f"• *Dépense 24h glissante* : ${rolling_24h:.4f} USD (max $0.30/j)\n"
             f"• *Dépense totale cumulée* : ${summary['total_cost_usd']:.4f} USD ({summary['total_attempts']} essais)\n"
             f"• *Solde DeepSeek API* : {bal_str}\n"
-            f"• *Tarification LLM* : {'🌙 Heures Creuses (-50%)' if offpeak else '☀️ Heures Pleines'}\n"
+            f"{offpeak_info}"
             f"• *Statut Daemon* : {'🛑 STOP actif' if stop_active else '🟢 Opérationnel'}\n\n"
             f"🔗 *Tableau de bord privé (Tailscale)* :\n"
             f"http://100.90.108.89:8088/dashboard.html"
         )
+
+    def notify_bounty_proposal(self, target_name: str, title: str, repo: str, url: str) -> bool:
+        """Proposition d'un nouveau bounty potentiel (Watcher) : notification SONORE obligatoire."""
+        msg = (
+            f"💰 *Proposition de Bounty Détectée*\n\n"
+            f"• *Cible* : `{target_name}`\n"
+            f"• *Titre* : {title}\n"
+            f"• *Dépôt* : `{repo}`\n"
+            f"• *URL* : {url}\n\n"
+            f"Commandes disponibles :\n"
+            f"👉 `/approve_{target_name}` : Valider et lancer l'autoformalisation (~1¢, en heures creuses)\n"
+            f"👉 `/deny_{target_name}` : Rejeter et archiver"
+        )
+        return self.send_message(msg, silent=False)
+
+    def notify_formalization_result(self, target_name: str, lean_stmt: str, back_translation: str, score: float) -> bool:
+        """Énoncé formalisé produit par l'autoformaliseur : notification SONORE obligatoire."""
+        msg = (
+            f"📝 *Énoncé Formel Produit pour `{target_name}`*\n\n"
+            f"• *Score d'équivalence sémantique* : {score * 100:.1f}%\n\n"
+            f"```lean\n{lean_stmt}\n```\n\n"
+            f"• *Rétro-traduction neutre* :\n_{back_translation}_\n\n"
+            f"Commandes de décision :\n"
+            f"👉 `/confirm_{target_name}` : Débloquer la recherche de preuve (en heures creuses -50%)\n"
+            f"👉 `/reject_{target_name}` : Rejeter l'énoncé\n"
+            f"👉 `/deny_{target_name}` : Archiver"
+        )
+        return self.send_message(msg, silent=False)
 
     def request_budget_approval(self, target_name: str, value_usd: float, p_success: float, estimated_cost: float) -> bool:
         """Demande d'autorisation de budget : notification SONORE."""
@@ -247,18 +295,31 @@ class TelegramNotifier:
         )
         return self.send_message(msg, silent=False)
 
-    def poll_approvals(self, pending_target_names: List[str]) -> Optional[Dict[str, str]]:
+    def poll_approvals(
+        self,
+        pending_target_names: Optional[List[str]] = None,
+        pending_approvals: Optional[List[str]] = None,
+        pending_confirms: Optional[List[str]] = None
+    ) -> Optional[Dict[str, str]]:
         """
         Interroge l'API getUpdates (canal entrant strict) :
         - Filtre STRICTEMENT sur chat_id == TELEGRAM_CHAT_ID.
         - Ignore tout message venant d'un autre chat.
         - Traite /status (compte-rendu + URL dashboard).
-        - N'accepte QUE /approve_<nom> et /deny_<nom> pour nom dans pending_target_names.
+        - Traite /approve_<nom> (débloque formalisation ~1¢).
+        - Traite /confirm_<nom> (débloque recherche de preuve).
+        - Traite /reject_<nom> (rejette formalisation).
+        - Traite /deny_<nom> (archive la cible).
         - Ignore et loggue tout autre message ou commande libre (aucun /stop distant).
         - Met à jour 'last_update_id' dans data/telegram_state.json.
         """
         if not self.bot_token or not self.chat_id:
             return None
+
+        # Harmonisation des listes de cibles en attente
+        names_for_approve = list(pending_approvals) if pending_approvals is not None else list(pending_target_names or [])
+        names_for_confirm = list(pending_confirms) if pending_confirms is not None else list(pending_target_names or [])
+        all_allowed_names = set(names_for_approve + names_for_confirm + (pending_target_names or []))
 
         state = self._load_state()
         last_id = state.get("last_update_id", 0)
@@ -296,31 +357,52 @@ class TelegramNotifier:
                 print(f"⚠️ [Telegram Security] Message ignoré (chat_id non autorisé: {sender_chat})")
                 continue
 
-            # RÈGLE ABSOLUE 2 : N'accepter QUE /status, /approve_<nom> et /deny_<nom>
+            # RÈGLE ABSOLUE 2 : N'accepter QUE /status, /approve_<nom>, /confirm_<nom>, /reject_<nom>, /deny_<nom>
             if raw_text == "/status" or raw_text.startswith("/status@"):
                 print("ℹ️ [Telegram] Commande /status reçue, transmission du compte-rendu...")
                 status_msg = self.build_status_report()
                 self.send_message(status_msg, silent=False)
                 result_action = {"action": "status"}
+
             elif raw_text.startswith("/approve_"):
                 cmd_arg = raw_text[len("/approve_"):].split("@")[0].strip()
-                if cmd_arg in pending_target_names:
+                if cmd_arg in names_for_approve:
                     print(f"✅ [Telegram] Approbation reçue pour la cible '{cmd_arg}' !")
-                    self.send_message(f"✅ *Budget autorisé* pour la cible `{cmd_arg}`. Reprise de la formalisation.", silent=False)
+                    self.send_message(f"✅ *Approbation reçue* pour `{cmd_arg}`. Autoformalisation autorisée (en heures creuses -50%).", silent=False)
                     result_action = {"target_name": cmd_arg, "action": "approve"}
                 else:
-                    print(f"ℹ️ [Telegram] Commande /approve ignorée : cible '{cmd_arg}' introuvable dans les cibles en attente ({pending_target_names}).")
+                    print(f"ℹ️ [Telegram] Commande /approve ignorée : cible '{cmd_arg}' introuvable dans les cibles en attente ({names_for_approve}).")
+
+            elif raw_text.startswith("/confirm_"):
+                cmd_arg = raw_text[len("/confirm_"):].split("@")[0].strip()
+                if cmd_arg in names_for_confirm:
+                    print(f"✅ [Telegram] Confirmation reçue pour la cible '{cmd_arg}' !")
+                    self.send_message(f"✅ *Recherche de preuve débloquée* pour `{cmd_arg}` (exécutée en heures creuses -50%).", silent=False)
+                    result_action = {"target_name": cmd_arg, "action": "confirm"}
+                else:
+                    print(f"ℹ️ [Telegram] Commande /confirm ignorée : cible '{cmd_arg}' introuvable dans les cibles en attente de confirmation ({names_for_confirm}).")
+
+            elif raw_text.startswith("/reject_"):
+                cmd_arg = raw_text[len("/reject_"):].split("@")[0].strip()
+                if cmd_arg in all_allowed_names:
+                    print(f"❌ [Telegram] Rejet reçu pour l'énoncé de '{cmd_arg}'.")
+                    self.send_message(f"❌ *Énoncé rejeté* pour `{cmd_arg}`. Cible reportée ou réessayée.", silent=False)
+                    result_action = {"target_name": cmd_arg, "action": "reject"}
+                else:
+                    print(f"ℹ️ [Telegram] Commande /reject ignorée : cible '{cmd_arg}' introuvable dans les cibles en attente.")
+
             elif raw_text.startswith("/deny_"):
                 cmd_arg = raw_text[len("/deny_"):].split("@")[0].strip()
-                if cmd_arg in pending_target_names:
-                    print(f"❌ [Telegram] Refus reçu pour la cible '{cmd_arg}'.")
-                    self.send_message(f"❌ *Refus pris en compte* pour `{cmd_arg}`. Cible reportée.", silent=False)
+                if cmd_arg in all_allowed_names:
+                    print(f"❌ [Telegram] Refus/Archivage reçu pour la cible '{cmd_arg}'.")
+                    self.send_message(f"❌ *Refus pris en compte* pour `{cmd_arg}`. Cible archivée.", silent=False)
                     result_action = {"target_name": cmd_arg, "action": "deny"}
                 else:
                     print(f"ℹ️ [Telegram] Commande /deny ignorée : cible '{cmd_arg}' introuvable dans les cibles en attente.")
+
             else:
                 # Texte libre ou commande non autorisée
-                print(f"ℹ️ [Telegram Security] Commande ou texte ignoré : '{raw_text}' (seuls /status, /approve_<nom> et /deny_<nom> sont autorisés).")
+                print(f"ℹ️ [Telegram Security] Commande ou texte ignoré : '{raw_text}' (seuls /status, /approve_<nom>, /confirm_<nom>, /reject_<nom> et /deny_<nom> sont autorisés).")
 
         state["last_update_id"] = last_id
         self._save_state(state)
