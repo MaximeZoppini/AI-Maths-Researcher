@@ -125,7 +125,7 @@ class TestTelegramNotifier(unittest.TestCase):
             "/approve",  # Manque le nom de la cible
             "/approve_other_target",  # Cible non en attente
             "rm -rf /",
-            "/status"
+            "/unknown_command"
         ]
 
         for text in unauthorized_texts:
@@ -150,6 +150,36 @@ class TestTelegramNotifier(unittest.TestCase):
 
             result = self.notifier.poll_approvals(["valid_pending_target"])
             self.assertIsNone(result, f"Le texte '{text}' aurait dû être ignoré")
+
+    @patch("urllib.request.urlopen")
+    def test_status_command_processing(self, mock_urlopen):
+        """La commande /status doit renvoyer le rapport KPIs et l'URL Tailscale du dashboard."""
+        status_updates = {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 2500,
+                    "message": {
+                        "message_id": 15,
+                        "chat": {"id": int(self.chat_id)},
+                        "from": {"id": int(self.chat_id)},
+                        "text": "/status"
+                    }
+                }
+            ]
+        }
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(status_updates).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        res = self.notifier.poll_approvals([])
+        self.assertEqual(res, {"action": "status"})
+        # Vérifier que le message sortant contient l'URL du dashboard et la métrique
+        sent_call = mock_urlopen.call_args_list[-1]
+        sent_payload = json.loads(sent_call[0][0].data.decode("utf-8"))
+        self.assertIn("100.90.108.89:8088/dashboard.html", sent_payload["text"])
+        self.assertIn("17 / 30", sent_payload["text"])
 
     @patch("urllib.request.urlopen")
     def test_valid_approval_and_denial_workflow(self, mock_urlopen):

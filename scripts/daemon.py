@@ -27,6 +27,7 @@ from agent.planner import BlueprintPlanner
 from agent.verifier import RemoteProdVerifier
 from agent.notifier import TelegramNotifier
 from scripts.bounty_report import generate_report
+from scripts.dashboard import generate_dashboard
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 QUEUE_PATH = ROOT_DIR / "targets" / "queue.yaml"
@@ -96,7 +97,19 @@ def run_daemon(
         cur_bal = get_deepseek_balance()
         notifier.send_daily_digest(db, q_targets, cur_bal)
 
+    # Génération initiale du dashboard statique
+    try:
+        generate_dashboard()
+    except Exception as e:
+        print(f"⚠️ Erreur génération dashboard : {e}")
+
     while True:
+        # Régénération du dashboard à chaque cycle
+        try:
+            generate_dashboard()
+        except Exception:
+            pass
+
         # Envoi automatique du Digest quotidien à 20:00 UTC
         now_dt = datetime.datetime.now(datetime.timezone.utc)
         today_str = now_dt.strftime("%Y-%m-%d")
@@ -327,6 +340,11 @@ def run_daemon(
                     cost=item_cost,
                     iterations=iterations
                 )
+
+                try:
+                    generate_dashboard()
+                except Exception:
+                    pass
 
                 if auto_commit:
                     git_commit_proof(current_target.name, item_cost)

@@ -152,6 +152,23 @@ Agrège les preuves certifiées 'axiom-clean' et statistiques dans `BOUNTY_REPOR
 python3 -B scripts/bounty_report.py
 ```
 
+### 9. Tableau de Bord Statique Haute Fidélité & Accès Privé Tailscale
+Génération d'une page HTML 100 % autonome, lisible hors-ligne, sans CDN ni requête réseau externe (graphiques SVG inline générés en Python, tri interactif et mode sombre/clair) :
+```bash
+# Génération manuelle à la demande (< 0.5s)
+python3 -B scripts/dashboard.py
+```
+- **Accès privé depuis vos appareils (Tailnet uniquement)** :
+  👉 **`http://100.90.108.89:8088/dashboard.html`**
+- **Sécurité réseau** : Servi par une unité systemd (`math-dashboard.service`) sur le LXC 200, relayée par proxy socat lié **strictement à l'IP Tailscale du serveur (`100.90.108.89:8088`)**. Aucun port exposé sur `0.0.0.0` ni sur Internet public.
+
+### 10. Bot Telegram Marcus (`@MathResolverMarcusBot`)
+Suivi à distance du daemon, alertes sonores et déblocage de budget :
+- **Notifications silencieuses** : Preuves certifiées sans sorry, détections du watcher, digest quotidien à 20:00 UTC.
+- **Alertes sonores** : Déclenchement des gates de sécurité (budget 24h, solde API bas, fichier STOP).
+- **Compte-rendu instantané** : Envoyez `/status` à Marcus pour recevoir en direct les KPIs essentiels et le lien du dashboard.
+- **Déblocage de budget** : `/approve_<cible>` pour autoriser une dépense au-delà du budget 24h sur une cible à prime positive.
+
 ---
 
 ## 📁 Arborescence du Projet

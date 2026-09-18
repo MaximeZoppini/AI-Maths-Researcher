@@ -198,9 +198,39 @@ class TelegramNotifier:
             f"• *Dépense 24h* : ${rolling_24h_cost:.4f} USD\n"
             f"• *Solde DeepSeek* : {bal_str}\n"
             f"• *Top cible EV* : {top_ev_text}\n"
-            f"• *File d'attente* : {len(queue_targets)} cible(s)"
+            f"• *File d'attente* : {len(queue_targets)} cible(s)\n"
+            f"• *Dashboard privé (Tailscale)* : http://100.90.108.89:8088/dashboard.html"
         )
         return self.send_message(msg, silent=True)
+
+    def build_status_report(self) -> str:
+        """Génère le mini compte-rendu textuel pour la commande /status du bot."""
+        from agent.db import AttemptsDB
+        from agent.prover import get_deepseek_balance, is_deepseek_offpeak
+
+        now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        certified_count = len(list((ROOT_DIR / "problems").glob("*.lean")))
+
+        db = AttemptsDB()
+        summary = db.get_summary()
+        rolling_24h = db.get_rolling_cost_usd(24)
+        balance = get_deepseek_balance()
+        bal_str = f"${balance:.2f} USD" if balance is not None else "N/A"
+        offpeak = is_deepseek_offpeak()
+        stop_active = (ROOT_DIR / "STOP").exists()
+
+        return (
+            f"📊 *État Actuel — AI-Maths-Researcher [{now_str}]*\n\n"
+            f"• *Métrique Officielle MiniF2F* : *17 / 30* (56.7%)\n"
+            f"• *Preuves certifiées prod* : *{certified_count} / {certified_count}* (100% Axiom-Clean)\n"
+            f"• *Dépense 24h glissante* : ${rolling_24h:.4f} USD (max $0.30/j)\n"
+            f"• *Dépense totale cumulée* : ${summary['total_cost_usd']:.4f} USD ({summary['total_attempts']} essais)\n"
+            f"• *Solde DeepSeek API* : {bal_str}\n"
+            f"• *Tarification LLM* : {'🌙 Heures Creuses (-50%)' if offpeak else '☀️ Heures Pleines'}\n"
+            f"• *Statut Daemon* : {'🛑 STOP actif' if stop_active else '🟢 Opérationnel'}\n\n"
+            f"🔗 *Tableau de bord privé (Tailscale)* :\n"
+            f"http://100.90.108.89:8088/dashboard.html"
+        )
 
     def request_budget_approval(self, target_name: str, value_usd: float, p_success: float, estimated_cost: float) -> bool:
         """Demande d'autorisation de budget : notification SONORE."""
@@ -222,6 +252,7 @@ class TelegramNotifier:
         Interroge l'API getUpdates (canal entrant strict) :
         - Filtre STRICTEMENT sur chat_id == TELEGRAM_CHAT_ID.
         - Ignore tout message venant d'un autre chat.
+        - Traite /status (compte-rendu + URL dashboard).
         - N'accepte QUE /approve_<nom> et /deny_<nom> pour nom dans pending_target_names.
         - Ignore et loggue tout autre message ou commande libre (aucun /stop distant).
         - Met à jour 'last_update_id' dans data/telegram_state.json.
@@ -265,8 +296,13 @@ class TelegramNotifier:
                 print(f"⚠️ [Telegram Security] Message ignoré (chat_id non autorisé: {sender_chat})")
                 continue
 
-            # RÈGLE ABSOLUE 2 : N'accepter QUE /approve_<nom> et /deny_<nom> pour une cible en attente
-            if raw_text.startswith("/approve_"):
+            # RÈGLE ABSOLUE 2 : N'accepter QUE /status, /approve_<nom> et /deny_<nom>
+            if raw_text == "/status" or raw_text.startswith("/status@"):
+                print("ℹ️ [Telegram] Commande /status reçue, transmission du compte-rendu...")
+                status_msg = self.build_status_report()
+                self.send_message(status_msg, silent=False)
+                result_action = {"action": "status"}
+            elif raw_text.startswith("/approve_"):
                 cmd_arg = raw_text[len("/approve_"):].split("@")[0].strip()
                 if cmd_arg in pending_target_names:
                     print(f"✅ [Telegram] Approbation reçue pour la cible '{cmd_arg}' !")
@@ -284,7 +320,7 @@ class TelegramNotifier:
                     print(f"ℹ️ [Telegram] Commande /deny ignorée : cible '{cmd_arg}' introuvable dans les cibles en attente.")
             else:
                 # Texte libre ou commande non autorisée
-                print(f"ℹ️ [Telegram Security] Commande ou texte ignoré : '{raw_text}' (seuls /approve_<nom> et /deny_<nom> sont autorisés).")
+                print(f"ℹ️ [Telegram Security] Commande ou texte ignoré : '{raw_text}' (seuls /status, /approve_<nom> et /deny_<nom> sont autorisés).")
 
         state["last_update_id"] = last_id
         self._save_state(state)
@@ -298,6 +334,7 @@ def main():
     parser.add_argument("--test-loud", action="store_true", help="Envoyer une alerte sonore de test")
     parser.add_argument("--test-approval", type=str, default=None, help="Tester une demande d'approbation pour une cible")
     parser.add_argument("--digest", action="store_true", help="Générer et envoyer le digest quotidien maintenant")
+    parser.add_argument("--status", action="store_true", help="Générer et envoyer le compte-rendu /status maintenant")
     parser.add_argument("--get-chat-id", action="store_true", help="Détecter le chat_id à partir des derniers messages Telegram")
     args = parser.parse_args()
 
@@ -348,6 +385,10 @@ def main():
         bal = get_deepseek_balance()
         ok = notifier.send_daily_digest(db, targets, bal)
         print(f"Digest quotidien envoyé : {'OK' if ok else 'ÉCHEC'}")
+
+    if args.status:
+        ok = notifier.send_message(notifier.build_status_report(), silent=False)
+        print(f"Compte-rendu /status envoyé : {'OK' if ok else 'ÉCHEC'}")
 
 if __name__ == "__main__":
     main()

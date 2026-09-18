@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Maths-Researcher — Tableau de Bord Privé</title>
+    <style>
+        :root {
+            --bg-body: #0f172a;
+            --bg-card: #1e293b;
+            --bg-card-alt: #334155;
+            --border: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #cbd5e1;
+            --text-muted: #94a3b8;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --accent: #8b5cf6;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+        }
+        [data-theme="light"] {
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --bg-card-alt: #f1f5f9;
+            --border: #e2e8f0;
+            --text-primary: #0f172a;
+            --text-secondary: #334155;
+            --text-muted: #64748b;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --success: #059669;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --accent: #7c3aed;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body { background-color: var(--bg-body); color: var(--text-primary); line-height: 1.5; padding: 24px 16px; transition: background-color 0.2s, color 0.2s; }
+        .container { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+        header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+        .header-title h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; display: flex; align-items: center; gap: 8px; }
+        .header-title p { color: var(--text-muted); font-size: 0.875rem; margin-top: 4px; }
+        .header-actions { display: flex; align-items: center; gap: 12px; }
+        .theme-toggle { background: var(--bg-card); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 0.875rem; display: flex; align-items: center; gap: 6px; }
+        .theme-toggle:hover { background: var(--bg-card-alt); }
+        
+        .banner { background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(139, 92, 246, 0.15)); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 12px; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+        .banner-metric { display: flex; align-items: baseline; gap: 10px; }
+        .banner-metric .label { font-size: 0.9rem; font-weight: 600; color: var(--primary); text-transform: uppercase; letter-spacing: 0.05em; }
+        .banner-metric .val { font-size: 1.5rem; font-weight: 800; color: var(--text-primary); }
+        .badge { display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .badge-success { background: rgba(16, 185, 129, 0.2); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.4); }
+        .badge-warning { background: rgba(245, 158, 11, 0.2); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.4); }
+        .badge-danger { background: rgba(239, 68, 68, 0.2); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.4); }
+        .badge-accent { background: rgba(139, 92, 246, 0.2); color: var(--accent); border: 1px solid rgba(139, 92, 246, 0.4); }
+        .badge-muted { background: rgba(148, 163, 184, 0.2); color: var(--text-muted); border: 1px solid rgba(148, 163, 184, 0.4); }
+
+        .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+        .kpi-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); }
+        .kpi-card .kpi-label { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em; }
+        .kpi-card .kpi-val { font-size: 1.45rem; font-weight: 700; margin-top: 6px; color: var(--text-primary); }
+        .kpi-card .kpi-sub { font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; }
+
+        .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 16px; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; }
+        .card-header h2 { font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .svg-chart { width: 100%; height: auto; display: block; }
+
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
+        th { background: var(--bg-card-alt); color: var(--text-secondary); font-weight: 600; padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+        th:hover { background: var(--border); }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-primary); vertical-align: middle; }
+        tr:hover td { background: rgba(255, 255, 255, 0.02); }
+        [data-theme="light"] tr:hover td { background: rgba(0, 0, 0, 0.02); }
+        .table-container { overflow-x: auto; max-height: 480px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+        .search-input { background: var(--bg-card-alt); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; width: 220px; }
+        .search-input:focus { outline: 2px solid var(--primary); }
+        a.lean-link { color: var(--primary); text-decoration: none; font-weight: 500; font-family: ui-monospace, monospace; }
+        a.lean-link:hover { text-decoration: underline; }
+
+        footer { border-top: 1px solid var(--border); padding-top: 16px; color: var(--text-muted); font-size: 0.8rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-title">
+                <h1>📐 AI-Maths-Researcher</h1>
+                <p>Tableau de bord haute fidélité — Production LXC & Démon Autonome</p>
+            </div>
+            <div class="header-actions">
+                <button class="theme-toggle" id="themeBtn" onclick="toggleTheme()">🌓 Basculer Thème</button>
+            </div>
+        </header>
+
+        <div class="banner">
+            <div class="banner-metric">
+                <span class="label">Métrique Officielle MiniF2F Test :</span>
+                <span class="val">17 / 30 <span style="font-size: 1rem; color: var(--text-muted); font-weight: 500;">(56.7%)</span></span>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <span class="badge badge-success">🏆 25 / 25 Certifiés Zéro-Sorry</span>
+                <span class="badge badge-accent">
+                    🌙 Heures Creuses Actives (-50%)
+                </span>
+                <span class="badge badge-success">
+                    🟢 Démon Actif
+                </span>
+            </div>
+        </div>
+
+        <!-- KPI GRID -->
+        <div class="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-label">Preuves Certifiées</div>
+                <div class="kpi-val" style="color: var(--success);">25</div>
+                <div class="kpi-sub">Axiomes Lean 4 certifiés en prod</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Dépense Totale API</div>
+                <div class="kpi-val">$0.9895</div>
+                <div class="kpi-sub">268 tentatives SQLite</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Dépense 24h Glissante</div>
+                <div class="kpi-val" style="color: var(--warning);">$0.9895</div>
+                <div class="kpi-sub">Plafond daemon : $0.30/jour</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Coût Moyen / Preuve</div>
+                <div class="kpi-val">$0.0396</div>
+                <div class="kpi-sub">Sur les 25 théorèmes</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Tokens Consommés</div>
+                <div class="kpi-val">1058.0k</div>
+                <div class="kpi-sub">505k in / 553k out</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Solde API DeepSeek</div>
+                <div class="kpi-val" style="color: var(--primary);">$1.51 USD</div>
+                <div class="kpi-sub">Seuil sécurité : $0.50 USD</div>
+            </div>
+        </div>
+
+        <!-- CHARTS SECTION -->
+        <div class="charts-grid">
+            <div class="card">
+                <div class="card-header">
+                    <h2>📅 Dépense Quotidienne ($ USD)</h2>
+                </div>
+                <svg viewBox='0 0 600 180' class='svg-chart'><line x1='60' y1='145.0' x2='580' y2='145.0' stroke='var(--border)' stroke-dasharray='3,3'/><text x='52' y='149.0' text-anchor='end' fill='var(--text-muted)' font-size='10'>$0.00</text><line x1='60' y1='105.0' x2='580' y2='105.0' stroke='var(--border)' stroke-dasharray='3,3'/><text x='52' y='109.0' text-anchor='end' fill='var(--text-muted)' font-size='10'>$0.38</text><line x1='60' y1='64.99999999999999' x2='580' y2='64.99999999999999' stroke='var(--border)' stroke-dasharray='3,3'/><text x='52' y='68.99999999999999' text-anchor='end' fill='var(--text-muted)' font-size='10'>$0.76</text><line x1='60' y1='25.0' x2='580' y2='25.0' stroke='var(--border)' stroke-dasharray='3,3'/><text x='52' y='29.0' text-anchor='end' fill='var(--text-muted)' font-size='10'>$1.14</text>
+        <g class='bar-group'>
+            <rect x='165.0' y='40.65217391304347' width='50' height='104.34782608695653' rx='4' fill='var(--primary)' opacity='0.85'/>
+            <text x='190.0' y='37' text-anchor='middle' fill='var(--text-primary)' font-size='10' font-weight='600'>$0.9895</text>
+            <text x='190.0' y='168' text-anchor='middle' fill='var(--text-muted)' font-size='10'>2026-09-17</text>
+        </g>
+        
+        <g class='bar-group'>
+            <rect x='425.0' y='145.0' width='50' height='0.0' rx='4' fill='var(--primary)' opacity='0.85'/>
+            <text x='450.0' y='139.0' text-anchor='middle' fill='var(--text-primary)' font-size='10' font-weight='600'>$0.0000</text>
+            <text x='450.0' y='168' text-anchor='middle' fill='var(--text-muted)' font-size='10'>2026-09-18</text>
+        </g>
+        <line x1='60' y1='145' x2='580' y2='145' stroke='var(--border)' stroke-width='1.5'/></svg>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h2>🤖 Répartition des Coûts par Modèle</h2>
+                </div>
+                <svg viewBox='0 0 600 164' class='svg-chart'>
+        <text x='130' y='34' text-anchor='end' fill='var(--text-primary)' font-size='11' font-weight='500'>deepseek-chat</text>
+        <rect x='140' y='20' width='370' height='20' rx='4' fill='var(--bg-card-alt)'/>
+        <rect x='140' y='20' width='43.177860528435964' height='20' rx='4' fill='#3b82f6' opacity='0.85'/>
+        <text x='191.17786052843596' y='34' fill='var(--text-primary)' font-size='11' font-weight='600'>$0.1034 <tspan fill='var(--text-muted)' font-size='10'>(225 att)</tspan></text>
+        
+        <text x='130' y='70' text-anchor='end' fill='var(--text-primary)' font-size='11' font-weight='500'>deepseek-reasoner</text>
+        <rect x='140' y='56' width='370' height='20' rx='4' fill='var(--bg-card-alt)'/>
+        <rect x='140' y='56' width='370.0' height='20' rx='4' fill='#8b5cf6' opacity='0.85'/>
+        <text x='518.0' y='70' fill='var(--text-primary)' font-size='11' font-weight='600'>$0.8861 <tspan fill='var(--text-muted)' font-size='10'>(32 att)</tspan></text>
+        
+        <text x='130' y='106' text-anchor='end' fill='var(--text-primary)' font-size='11' font-weight='500'>gemini-2.5-flash</text>
+        <rect x='140' y='92' width='370' height='20' rx='4' fill='var(--bg-card-alt)'/>
+        <rect x='140' y='92' width='4' height='20' rx='4' fill='#10b981' opacity='0.85'/>
+        <text x='148.0' y='106' fill='var(--text-primary)' font-size='11' font-weight='600'>$0.0000 <tspan fill='var(--text-muted)' font-size='10'>(7 att)</tspan></text>
+        
+        <text x='130' y='142' text-anchor='end' fill='var(--text-primary)' font-size='11' font-weight='500'>tactic-automation</text>
+        <rect x='140' y='128' width='370' height='20' rx='4' fill='var(--bg-card-alt)'/>
+        <rect x='140' y='128' width='4' height='20' rx='4' fill='#f59e0b' opacity='0.85'/>
+        <text x='148.0' y='142' fill='var(--text-primary)' font-size='11' font-weight='600'>$0.0000 <tspan fill='var(--text-muted)' font-size='10'>(4 att)</tspan></text>
+        </svg>
+            </div>
+        </div>
+
+        <!-- CLASS SUCCESS RATE -->
+        <div class="card">
+            <div class="card-header">
+                <h2>🎯 Taux de Succès par Classe de Difficulté</h2>
+                <span style="font-size: 0.8rem; color: var(--text-muted);">Empirique depuis attempts.db</span>
+            </div>
+            <svg viewBox='0 0 600 212' class='svg-chart'>
+        <text x='100' y='28' text-anchor='end' fill='var(--text-primary)' font-size='11' font-weight='500'>other</text>
+        <rect x='110' y='15' width='380' height='18' rx='4' fill='var(--bg-card-alt)'/>
+        <rect x='110' y='15' width='380.0' height='18' rx='4' fill='#10b981' opacity='0.85'/>
+        <text x='498' y='28' fill='var(--text-primary)' font-size='11' font-weight='600'>100.0% <tspan fill='var(--text-muted)' font-size='10'>(4/4)</tspan></text>
+        
+        <text x='100' y='60' text-anchor='end' fill='var(--text-primary)' font-size='11' font-weight='500'>aime</text>
+        <rect x='110' y='47' width='380' height='18' rx='4' fill='var(--bg-card-alt)'/>
+        <rect x='110' y='47' width='380.0' height='18' rx='4' fill='#10b981' opacity='0.85'/>
+        <text x='498' y='60' fill='var(--text-primary)' font-size='11' font-weight='600'>100.0% <tspan fill='var(--text-muted)' font-size='10'>(1/1)</tspan></text>
+        
+        <text x='100' y='92' text-anchor='end' fill='var(--text-primary)' font-size='11' font-weight='500'>mathd</text>
+        <rect x='110' y='79' width='380' height='18' rx='4' fill='var(--bg-card-alt)'/>
+        <rect x='110' y='79' width='312.94117647058823' height='18' rx='4' fill='#10b981' opacity='0.85'/>
+        <text x='498' y='92' fill='var(--text-primary)' font-size='11' font-weight='600'>82.4% <tspan fill='var(--text-muted)' font-size='10'>(14/17)</tspan></text>
+        
+        <text x='100' y='124' text-anchor='end' fill='var(--text-primary)' font-size='11' font-weight='500'>olympiad_other</text>
+        <rect x='110' y='111' width='380' height='18' rx='4' fill='var(--bg-card-alt)'/>
+        <rect x='110' y='111' width='142.5' height='18' rx='4' fill='#f59e0b' opacity='0.85'/>
+        <text x='498' y='124' fill='var(--text-primary)' font-size='11' font-weight='600'>37.5% <tspan fill='var(--text-muted)' font-size='10'>(3/8)</tspan></text>
+        
+        <text x='100' y='156' text-anchor='end' fill='var(--text-primary)' font-size='11' font-weight='500'>amc</text>
+        <rect x='110' y='143' width='380' height='18' rx='4' fill='var(--bg-card-alt)'/>
+        <rect x='110' y='143' width='95.0' height='18' rx='4' fill='#f59e0b' opacity='0.85'/>
+        <text x='498' y='156' fill='var(--text-primary)' font-size='11' font-weight='600'>25.0% <tspan fill='var(--text-muted)' font-size='10'>(1/4)</tspan></text>
+        
+        <text x='100' y='188' text-anchor='end' fill='var(--text-primary)' font-size='11' font-weight='500'>imo</text>
+        <rect x='110' y='175' width='380' height='18' rx='4' fill='var(--bg-card-alt)'/>
+        <rect x='110' y='175' width='0' height='18' rx='4' fill='#ef4444' opacity='0.85'/>
+        <text x='498' y='188' fill='var(--text-primary)' font-size='11' font-weight='600'>0.0% <tspan fill='var(--text-muted)' font-size='10'>(0/6)</tspan></text>
+        </svg>
+        </div>
+
+        <!-- THEOREMS TABLE -->
+        <div class="card">
+            <div class="card-header">
+                <h2>📜 Historique des 25 Théorèmes Certifiés en Production</h2>
+                <input type="text" id="theoremSearch" class="search-input" placeholder="Filtrer un théorème..." onkeyup="filterTheorems()">
+            </div>
+            <div class="table-container">
+                <table id="theoremsTable">
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable(0)">Théorème ↕</th>
+                            <th onclick="sortTable(1)">Classe ↕</th>
+                            <th onclick="sortTable(2)">Modèle Résolveur ↕</th>
+                            <th onclick="sortTable(3)">Itérations ↕</th>
+                            <th onclick="sortTable(4)">Coût ($) ↕</th>
+                            <th onclick="sortTable(5)">Horodatage UTC ↕</th>
+                            <th>Fichier Source</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+    
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">AutoCommSq</td>
+                            <td><span class="badge badge-warning">other</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">tactic-automation / compiler</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00000</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">Certifié Prod</td>
+                            <td><a class="lean-link" href="../problems/AutoCommSq.lean" target="_blank">📄 AutoCommSq.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">AutoNatSub</td>
+                            <td><span class="badge badge-warning">other</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">tactic-automation / compiler</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00000</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">Certifié Prod</td>
+                            <td><a class="lean-link" href="../problems/AutoNatSub.lean" target="_blank">📄 AutoNatSub.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">Problem1_EvenSquare</td>
+                            <td><span class="badge badge-warning">other</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">tactic-automation / compiler</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00000</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">Certifié Prod</td>
+                            <td><a class="lean-link" href="../problems/Problem1_EvenSquare.lean" target="_blank">📄 Problem1_EvenSquare.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">Problem2_ModThreeSquare</td>
+                            <td><span class="badge badge-warning">other</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">tactic-automation / compiler</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00000</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">Certifié Prod</td>
+                            <td><a class="lean-link" href="../problems/Problem2_ModThreeSquare.lean" target="_blank">📄 Problem2_ModThreeSquare.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">Problem3_Inequalities</td>
+                            <td><span class="badge badge-warning">other</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">tactic-automation / compiler</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00000</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">Certifié Prod</td>
+                            <td><a class="lean-link" href="../problems/Problem3_Inequalities.lean" target="_blank">📄 Problem3_Inequalities.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">SampleProblem</td>
+                            <td><span class="badge badge-warning">other</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">tactic-automation / compiler</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00000</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">Certifié Prod</td>
+                            <td><a class="lean-link" href="../problems/SampleProblem.lean" target="_blank">📄 SampleProblem.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_algebra_141</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">tactic-automation</td>
+                            <td style="text-align: center;">0</td>
+                            <td>$0.00000</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-18 08:25:59</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_algebra_141.lean" target="_blank">📄 mathd_algebra_141.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_numbertheory_3</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">tactic-automation</td>
+                            <td style="text-align: center;">0</td>
+                            <td>$0.00000</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-18 08:25:47</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_numbertheory_3.lean" target="_blank">📄 mathd_numbertheory_3.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_algebra_478</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">tactic-automation</td>
+                            <td style="text-align: center;">0</td>
+                            <td>$0.00000</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-18 08:25:33</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_algebra_478.lean" target="_blank">📄 mathd_algebra_478.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_algebra_392</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-chat</td>
+                            <td style="text-align: center;">2</td>
+                            <td>$0.00021</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 15:10:15</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_algebra_392.lean" target="_blank">📄 mathd_algebra_392.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_algebra_137</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-chat</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00014</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 14:10:22</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_algebra_137.lean" target="_blank">📄 mathd_algebra_137.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_algebra_459</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-reasoner</td>
+                            <td style="text-align: center;">3</td>
+                            <td>$0.00934</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 14:04:54</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_algebra_459.lean" target="_blank">📄 mathd_algebra_459.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_numbertheory_430</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-chat</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00045</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 14:04:23</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_numbertheory_430.lean" target="_blank">📄 mathd_numbertheory_430.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_algebra_398</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-chat</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00024</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 13:59:59</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_algebra_398.lean" target="_blank">📄 mathd_algebra_398.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_numbertheory_x5neqy2p4</td>
+                            <td><span class="badge badge-warning">olympiad_other</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-reasoner</td>
+                            <td style="text-align: center;">3</td>
+                            <td>$0.02782</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 13:57:35</td>
+                            <td><a class="lean-link" href="../problems/minif2f_numbertheory_x5neqy2p4.lean" target="_blank">📄 numbertheory_x5neqy2p4.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_algebra_sqineq_unitcircatbpabsamblt1</td>
+                            <td><span class="badge badge-warning">olympiad_other</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-reasoner</td>
+                            <td style="text-align: center;">3</td>
+                            <td>$0.01665</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 13:43:03</td>
+                            <td><a class="lean-link" href="../problems/minif2f_algebra_sqineq_unitcircatbpabsamblt1.lean" target="_blank">📄 algebra_sqineq_unitcircatbpabsamblt1.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_numbertheory_1124</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-reasoner</td>
+                            <td style="text-align: center;">3</td>
+                            <td>$0.00547</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 13:37:48</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_numbertheory_1124.lean" target="_blank">📄 mathd_numbertheory_1124.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_algebra_419</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-chat</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00006</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 12:56:55</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_algebra_419.lean" target="_blank">📄 mathd_algebra_419.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_amc12b_2020_p2</td>
+                            <td><span class="badge badge-accent">amc</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-chat</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00006</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 12:55:20</td>
+                            <td><a class="lean-link" href="../problems/minif2f_amc12b_2020_p2.lean" target="_blank">📄 amc12b_2020_p2.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_numbertheory_299</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-chat</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00009</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 12:55:11</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_numbertheory_299.lean" target="_blank">📄 mathd_numbertheory_299.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_algebra_33</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-chat</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00010</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 12:54:19</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_algebra_33.lean" target="_blank">📄 mathd_algebra_33.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_numbertheory_237</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-chat</td>
+                            <td style="text-align: center;">1</td>
+                            <td>$0.00011</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 12:54:09</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_numbertheory_237.lean" target="_blank">📄 mathd_numbertheory_237.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_mathd_algebra_209</td>
+                            <td><span class="badge badge-success">mathd</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-chat</td>
+                            <td style="text-align: center;">3</td>
+                            <td>$0.00021</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 12:52:42</td>
+                            <td><a class="lean-link" href="../problems/minif2f_mathd_algebra_209.lean" target="_blank">📄 mathd_algebra_209.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">minif2f_aime_1983_p1</td>
+                            <td><span class="badge badge-accent">aime</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">deepseek-chat</td>
+                            <td style="text-align: center;">2</td>
+                            <td>$0.00056</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 12:50:27</td>
+                            <td><a class="lean-link" href="../problems/minif2f_aime_1983_p1.lean" target="_blank">📄 aime_1983_p1.lean</a></td>
+                        </tr>
+        
+                        <tr>
+                            <td style="font-weight: 600; font-family: ui-monospace, monospace;">AutoNatCancel</td>
+                            <td><span class="badge badge-warning">other</span></td>
+                            <td style="font-size: 0.8rem; color: var(--text-secondary);">gemini-2.5-flash</td>
+                            <td style="text-align: center;">2</td>
+                            <td>$0.00000</td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">2026-09-17 11:49:08</td>
+                            <td><a class="lean-link" href="../problems/AutoNatCancel.lean" target="_blank">📄 AutoNatCancel.lean</a></td>
+                        </tr>
+        
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- TARGETS & MATHLIB GAPS -->
+        <div class="charts-grid">
+            <!-- TARGETS PIPELINE -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🎯 Pipeline & Registre de Cibles</h2>
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">targets/registry.yaml</span>
+                </div>
+                <div class="table-container" style="max-height: 320px;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Cible</th>
+                                <th>Classe</th>
+                                <th>Vérifiée</th>
+                                <th>Prime (USD)</th>
+                                <th>EV Estimée</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+    
+                            <tr>
+                                <td style="font-weight: 500; font-family: ui-monospace, monospace;">mathd_algebra_392</td>
+                                <td><span class="badge badge-muted">mathd</span></td>
+                                <td><span class="badge badge-success">VÉRIFIÉE</span></td>
+                                <td style="font-weight: 600;">$0.00</td>
+                                <td>+0.76</td>
+                            </tr>
+        
+                            <tr>
+                                <td style="font-weight: 500; font-family: ui-monospace, monospace;">amc12a_2021_p8</td>
+                                <td><span class="badge badge-muted">amc</span></td>
+                                <td><span class="badge badge-success">VÉRIFIÉE</span></td>
+                                <td style="font-weight: 600;">$0.00</td>
+                                <td>+0.19</td>
+                            </tr>
+        
+                            <tr>
+                                <td style="font-weight: 500; font-family: ui-monospace, monospace;">draft_external_candidate_example</td>
+                                <td><span class="badge badge-muted">unknown</span></td>
+                                <td><span class="badge badge-warning">EN ATTENTE</span></td>
+                                <td style="font-weight: 600;">$0.00</td>
+                                <td>+0.14</td>
+                            </tr>
+        
+                            <tr>
+                                <td style="font-weight: 500; font-family: ui-monospace, monospace;">issue_leanprover-community_mathlib4_43872</td>
+                                <td><span class="badge badge-muted">unknown</span></td>
+                                <td><span class="badge badge-warning">EN ATTENTE</span></td>
+                                <td style="font-weight: 600;">$0.00</td>
+                                <td>+0.14</td>
+                            </tr>
+        
+                            <tr>
+                                <td style="font-weight: 500; font-family: ui-monospace, monospace;">issue_leanprover-community_mathlib4_43870</td>
+                                <td><span class="badge badge-muted">unknown</span></td>
+                                <td><span class="badge badge-warning">EN ATTENTE</span></td>
+                                <td style="font-weight: 600;">$0.00</td>
+                                <td>+0.14</td>
+                            </tr>
+        
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- MATHLIB GAPS CANDIDATES -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>⛏️ Top Trous Détectés dans Mathlib</h2>
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">Rapport Loogle récent</span>
+                </div>
+                <div class="table-container" style="max-height: 320px;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Identifiant Halluciné / Demandé</th>
+                                <th>Freq</th>
+                                <th>Statut Loogle</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+    
+                            <tr>
+                                <td>1</td>
+                                <td style="font-family: ui-monospace, monospace; font-size: 0.8rem; font-weight: 600;">Real.logb</td>
+                                <td style="font-weight: 600;">65</td>
+                                <td><span class="badge badge-success">🟢 **probable** (existe sous ce nom exact)</span></td>
+                            </tr>
+        
+                            <tr>
+                                <td>2</td>
+                                <td style="font-family: ui-monospace, monospace; font-size: 0.8rem; font-weight: 600;">Finset.prod_range_id</td>
+                                <td style="font-weight: 600;">12</td>
+                                <td><span class="badge badge-danger">🔴 **introuvable_via_loogle** (trou Mathlib potentiel)</span></td>
+                            </tr>
+        
+                            <tr>
+                                <td>3</td>
+                                <td style="font-family: ui-monospace, monospace; font-size: 0.8rem; font-weight: 600;">NNReal.coe_sqrt</td>
+                                <td style="font-weight: 600;">9</td>
+                                <td><span class="badge badge-danger">🔴 **introuvable_via_loogle** (trou Mathlib potentiel)</span></td>
+                            </tr>
+        
+                            <tr>
+                                <td>4</td>
+                                <td style="font-family: ui-monospace, monospace; font-size: 0.8rem; font-weight: 600;">pow_eq_zero</td>
+                                <td style="font-weight: 600;">7</td>
+                                <td><span class="badge badge-danger">🔴 **introuvable_via_loogle** (trou Mathlib potentiel)</span></td>
+                            </tr>
+        
+                            <tr>
+                                <td>5</td>
+                                <td style="font-family: ui-monospace, monospace; font-size: 0.8rem; font-weight: 600;">add_ne_zero_of_ne_zero_of_nonneg_of_nonneg</td>
+                                <td style="font-weight: 600;">2</td>
+                                <td><span class="badge badge-danger">🔴 **introuvable_via_loogle** (trou Mathlib potentiel)</span></td>
+                            </tr>
+        
+                            <tr>
+                                <td>6</td>
+                                <td style="font-family: ui-monospace, monospace; font-size: 0.8rem; font-weight: 600;">sq_ne_zero_iff</td>
+                                <td style="font-weight: 600;">2</td>
+                                <td><span class="badge badge-danger">🔴 **introuvable_via_loogle** (trou Mathlib potentiel)</span></td>
+                            </tr>
+        
+                            <tr>
+                                <td>7</td>
+                                <td style="font-family: ui-monospace, monospace; font-size: 0.8rem; font-weight: 600;">Nat.add_pow</td>
+                                <td style="font-weight: 600;">2</td>
+                                <td><span class="badge badge-accent">🔵 **existe_sous_autre_nom** (`add_pow`)</span></td>
+                            </tr>
+        
+                            <tr>
+                                <td>8</td>
+                                <td style="font-family: ui-monospace, monospace; font-size: 0.8rem; font-weight: 600;">irrational_sqrt_of_prime</td>
+                                <td style="font-weight: 600;">2</td>
+                                <td><span class="badge badge-danger">🔴 **introuvable_via_loogle** (trou Mathlib potentiel)</span></td>
+                            </tr>
+        
+                            <tr>
+                                <td>9</td>
+                                <td style="font-family: ui-monospace, monospace; font-size: 0.8rem; font-weight: 600;">Real.sq_abs</td>
+                                <td style="font-weight: 600;">1</td>
+                                <td><span class="badge badge-accent">🔵 **existe_sous_autre_nom** (`sq_abs`)</span></td>
+                            </tr>
+        
+                            <tr>
+                                <td>10</td>
+                                <td style="font-family: ui-monospace, monospace; font-size: 0.8rem; font-weight: 600;">pow_two_ne_zero</td>
+                                <td style="font-weight: 600;">1</td>
+                                <td><span class="badge badge-danger">🔴 **introuvable_via_loogle** (trou Mathlib potentiel)</span></td>
+                            </tr>
+        
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <div>Généré automatiquement par <code>scripts/dashboard.py</code> — Dernière mise à jour : <strong>2026-09-18 10:35:33 UTC</strong></div>
+            <div>Serveur privé Tailscale : <code>http://100.90.108.89:8088/dashboard.html</code></div>
+        </footer>
+    </div>
+
+    <script>
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme');
+            const target = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', target);
+            try { localStorage.setItem('theme', target); } catch(e) {}
+        }
+
+        try {
+            const saved = localStorage.getItem('theme');
+            if (saved) document.documentElement.setAttribute('data-theme', saved);
+        } catch(e) {}
+
+        function filterTheorems() {
+            const query = document.getElementById('theoremSearch').value.toLowerCase();
+            const rows = document.querySelectorAll('#theoremsTable tbody tr');
+            rows.forEach(r => {
+                r.style.display = r.textContent.toLowerCase().includes(query) ? '' : 'none';
+            });
+        }
+
+        function sortTable(colIndex) {
+            const table = document.getElementById('theoremsTable');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const isAsc = table.getAttribute('data-sort-col') == colIndex && table.getAttribute('data-sort-order') === 'asc';
+            
+            rows.sort((a, b) => {
+                let valA = a.children[colIndex].textContent.trim();
+                let valB = b.children[colIndex].textContent.trim();
+                let numA = parseFloat(valA.replace(/[^0-9.-]+/g, ''));
+                let numB = parseFloat(valB.replace(/[^0-9.-]+/g, ''));
+                if (!isNaN(numA) && !isNaN(numB)) {
+                    return isAsc ? numB - numA : numA - numB;
+                }
+                return isAsc ? valB.localeCompare(valA) : valA.localeCompare(valB);
+            });
+
+            rows.forEach(r => tbody.appendChild(r));
+            table.setAttribute('data-sort-col', colIndex);
+            table.setAttribute('data-sort-order', isAsc ? 'desc' : 'asc');
+        }
+    </script>
+</body>
+</html>

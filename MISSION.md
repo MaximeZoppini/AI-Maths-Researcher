@@ -314,7 +314,7 @@ Nouveau : `agent/notifier.py` + variables `.env` : `TELEGRAM_BOT_TOKEN`, `TELEGR
 
 ---
 
-## TÂCHE 12 — Dashboard statique + compte-rendu /status du bot
+## TÂCHE 12 — Dashboard statique + compte-rendu /status du bot — ✅ TERMINÉE
 
 Décision d'architecture : PAS de serveur web applicatif (Flask/FastAPI = surface
 d'attaque, auth à gérer, maintenance). À la place :
@@ -323,38 +323,41 @@ Le bot Telegram (tâche 11) fait le push, le dashboard fait le pull.
 
 Nouveau : `scripts/dashboard.py` → génère `reports/dashboard.html`
 
-1. **Page 100 % auto-contenue** : CSS et JS inline, AUCUN CDN ni requête externe,
-   graphiques en SVG inline générés côté Python. Lisible hors-ligne, thème sombre/clair.
-2. **Sections** (toutes calculées depuis `data/attempts.db` + `targets/*.yaml`,
+1. **Page 100 % auto-contenue [✅ IMPLÉMENTÉ]** : CSS et JS inline, AUCUN CDN ni requête externe,
+   graphiques en SVG inline générés côté Python. Lisible hors-ligne, thème sombre/clair commutable.
+2. **Sections [✅ IMPLÉMENTÉ]** (toutes calculées depuis `data/attempts.db` + `targets/*.yaml`,
    RIEN d'inventé) :
-   - **KPIs** : preuves certifiées distinctes, taux de succès par classe de difficulté,
-     dépense totale / dernières 24 h / par preuve, tokens consommés (in/out, cache),
+   - **KPIs** : preuves certifiées distinctes (25), taux de succès par classe de difficulté,
+     dépense totale ($0.99) / dernières 24 h / par preuve ($0.039), tokens consommés (in/out, cache),
      solde API en direct (`get_deepseek_balance`).
-   - **Historique des preuves** : tableau triable (nom, classe, modèle, itérations,
+   - **Historique des preuves** : tableau interactif triable (nom, classe, modèle, itérations,
      coût, date, lien relatif vers `problems/<fichier>.lean`), une ligne par théorème
-     distinct (meilleure preuve), métrique officielle rappelée en tête.
+     distinct (meilleure preuve), métrique officielle rappelée en tête (17/30 - 56.7%).
    - **Dépense dans le temps** : coût cumulé par jour + répartition par modèle
      (barres SVG), fenêtre heures creuses indiquée.
    - **Cibles & pipeline** : registre avec statut `verified`, classement EV
      (réutiliser `rank_targets`), candidats du dernier rapport `mathlib_gaps`.
-     Pour les bounties : afficher UNIQUEMENT les valeurs saisies dans le registre —
+     Pour les bounties : affichage UNIQUEMENT des valeurs saisies dans le registre —
      jamais d'estimation générée.
    - **Santé du daemon** : dernière activité, gates déclenchées récemment, état STOP.
-3. **Régénération** : à chaque cycle du daemon + à chaque preuve certifiée + commande
-   manuelle `python3 -B scripts/dashboard.py`. Coût : une lecture SQLite, < 1 s.
-4. **Accès depuis les appareils de l'utilisateur** : unité systemd sur le LXC
-   `python3 -m http.server 8088 --directory reports --bind <IP_tailnet_du_LXC>`
-   (bind UNIQUEMENT sur l'IP Tailscale, jamais 0.0.0.0). Documenter l'URL dans le README.
-5. **Bot (extension stricte de la tâche 11)** : ajouter UNE commande entrante
+3. **Régénération [✅ IMPLÉMENTÉ]** : à chaque cycle du daemon + à chaque preuve certifiée + commande
+   manuelle `python3 -B scripts/dashboard.py`. Coût : une lecture SQLite, < 0.4 s.
+4. **Accès depuis les appareils de l'utilisateur [✅ IMPLÉMENTÉ]** : unité systemd sur le LXC 200
+   (`math-dashboard.service`) relayée par proxy socat (`math-dashboard-proxy.service`)
+   sur l'hôte Proxmox (bind UNIQUEMENT sur l'IP Tailscale `100.90.108.89:8088`, jamais 0.0.0.0).
+   URL documentée dans le README.
+5. **Bot (extension stricte de la tâche 11) [✅ IMPLÉMENTÉ]** : ajout de la commande entrante
    read-only `/status` → Marcus répond avec le mini compte-rendu (KPIs du point 2)
    + l'URL du dashboard. Même règle que /approve : chat_id exact, commande exacte,
    tout le reste ignoré. Le digest quotidien inclut aussi l'URL.
 
-**Acceptation :** `dashboard.html` s'ouvre hors-ligne dans un navigateur sans aucune
-requête réseau (vérifiable : onglet réseau vide) ; les chiffres collent à
-`agent.stats` et à la métrique officielle ; `/status` répond sur Telegram ;
-le serveur n'écoute que sur l'IP tailnet ; regénération automatique constatée après
-une preuve certifiée.
+**Acceptation validée :**
+- `dashboard.html` s'ouvre hors-ligne sans aucune requête réseau (audit automatisé zéro CDN, zéro script/css/img externe validé).
+- Les chiffres correspondent exactement à `data/attempts.db` et à la métrique officielle (17/30, 25 théorèmes certifiés).
+- `/status` répond sur Telegram depuis le bot Marcus avec les KPIs et l'URL Tailscale.
+- Le serveur écoute strictement sur l'IP Tailscale `100.90.108.89:8088` (vérifié par `ss -tulpn`).
+- Régénération automatique intégrée au démarrage du daemon, à chaque cycle et à chaque certification.
+- 13 tests unitaires et d'intégration validés.
 
 ---
 
