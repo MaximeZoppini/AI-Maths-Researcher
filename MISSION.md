@@ -275,6 +275,89 @@ de `GET /models` ; calcul de coût actualisé avec réduction -50 % en heures cr
 
 ---
 
+## TÂCHE 11 — Bot Telegram : reporting silencieux + déblocage de budget avec accord humain — ✅ TERMINÉE
+
+Objectif : l'utilisateur suit le daemon depuis son téléphone sans ouvrir un terminal,
+et AUCUNE dépense au-delà du budget quotidien ne se fait sans son accord explicite.
+
+Nouveau : `agent/notifier.py` + variables `.env` : `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+
+1. **Notifications sortantes** (`sendMessage`, `disable_notification: true` par défaut =
+   silencieuses) [✅ IMPLÉMENTÉ] :
+   - Preuve certifiée : nom, classe, coût, itérations.
+   - Gate déclenchée (budget 24h, solde bas, STOP) — celle-ci en notification SONORE.
+   - Watcher : « N nouvelles cibles en attente de validation » avec titres + URLs.
+   - Digest quotidien à 20:00 : résolus/échoués, dépense 24h, solde, top cible EV.
+2. **Demande d'autorisation de dépense** (le seul flux entrant) [✅ IMPLÉMENTÉ] : quand une cible
+   `verified: true` avec `value_usd > 0` a une EV positive mais que son budget calculé
+   dépasse le plafond quotidien restant, le daemon envoie une demande SONORE :
+   « Cible <nom> — prime $X, p_success Y%, coût estimé $Z. Répondre /approve_<nom>
+   pour débloquer $Z sur cette cible. » La cible reste en attente tant que pas de réponse.
+3. **Sécurité du canal entrant (strict)** [✅ IMPLÉMENTÉ] :
+   - Long-poll `getUpdates` ; IGNORER tout message dont `chat.id != TELEGRAM_CHAT_ID`.
+   - N'accepter QUE les commandes exactes `/approve_<nom>` et `/deny_<nom>` où <nom>
+     matche une cible en attente. Tout autre texte est ignoré et loggué.
+   - `/approve` pose `budget_unlocked: true` sur la cible (jamais `verified` — la
+     validation de contenu reste dans le YAML, à la main).
+   - Aucune commande libre, aucun contrôle du daemon par Telegram (pas de /stop distant :
+     le kill-switch reste le fichier STOP local).
+4. **Robustesse [✅ IMPLÉMENTÉ]** : si Telegram est injoignable, le daemon continue sans notifier (jamais
+   bloquant) ; état du long-poll dans `data/telegram_state.json`.
+
+**Acceptation validée :**
+- Digest et notification de preuve reçus sur le téléphone en silencieux (`disable_notification: true`).
+- Demande d'approbation reçue en sonore sur une cible de test à valeur fictive marquée localement.
+- `/approve` depuis le bon chat_id débloque la cible (`budget_unlocked: true`), depuis un autre chat_id est rejeté.
+- Texte libre et commandes arbitraires strictement ignorés et loggués.
+- Daemon 100 % opérationnel et résilient même avec Telegram déconnecté ou inaccessible.
+- Suite complète de 7 tests unitaires + tests d'intégration validée.
+
+---
+
+## TÂCHE 12 — Dashboard statique + compte-rendu /status du bot
+
+Décision d'architecture : PAS de serveur web applicatif (Flask/FastAPI = surface
+d'attaque, auth à gérer, maintenance). À la place :
+**une page HTML statique auto-contenue regénérée depuis la base**, servie en privé.
+Le bot Telegram (tâche 11) fait le push, le dashboard fait le pull.
+
+Nouveau : `scripts/dashboard.py` → génère `reports/dashboard.html`
+
+1. **Page 100 % auto-contenue** : CSS et JS inline, AUCUN CDN ni requête externe,
+   graphiques en SVG inline générés côté Python. Lisible hors-ligne, thème sombre/clair.
+2. **Sections** (toutes calculées depuis `data/attempts.db` + `targets/*.yaml`,
+   RIEN d'inventé) :
+   - **KPIs** : preuves certifiées distinctes, taux de succès par classe de difficulté,
+     dépense totale / dernières 24 h / par preuve, tokens consommés (in/out, cache),
+     solde API en direct (`get_deepseek_balance`).
+   - **Historique des preuves** : tableau triable (nom, classe, modèle, itérations,
+     coût, date, lien relatif vers `problems/<fichier>.lean`), une ligne par théorème
+     distinct (meilleure preuve), métrique officielle rappelée en tête.
+   - **Dépense dans le temps** : coût cumulé par jour + répartition par modèle
+     (barres SVG), fenêtre heures creuses indiquée.
+   - **Cibles & pipeline** : registre avec statut `verified`, classement EV
+     (réutiliser `rank_targets`), candidats du dernier rapport `mathlib_gaps`.
+     Pour les bounties : afficher UNIQUEMENT les valeurs saisies dans le registre —
+     jamais d'estimation générée.
+   - **Santé du daemon** : dernière activité, gates déclenchées récemment, état STOP.
+3. **Régénération** : à chaque cycle du daemon + à chaque preuve certifiée + commande
+   manuelle `python3 -B scripts/dashboard.py`. Coût : une lecture SQLite, < 1 s.
+4. **Accès depuis les appareils de l'utilisateur** : unité systemd sur le LXC
+   `python3 -m http.server 8088 --directory reports --bind <IP_tailnet_du_LXC>`
+   (bind UNIQUEMENT sur l'IP Tailscale, jamais 0.0.0.0). Documenter l'URL dans le README.
+5. **Bot (extension stricte de la tâche 11)** : ajouter UNE commande entrante
+   read-only `/status` → Marcus répond avec le mini compte-rendu (KPIs du point 2)
+   + l'URL du dashboard. Même règle que /approve : chat_id exact, commande exacte,
+   tout le reste ignoré. Le digest quotidien inclut aussi l'URL.
+
+**Acceptation :** `dashboard.html` s'ouvre hors-ligne dans un navigateur sans aucune
+requête réseau (vérifiable : onglet réseau vide) ; les chiffres collent à
+`agent.stats` et à la métrique officielle ; `/status` répond sur Telegram ;
+le serveur n'écoute que sur l'IP tailnet ; regénération automatique constatée après
+une preuve certifiée.
+
+---
+
 ## Après cette mission
 
 Plus AUCUN développement du harnais sans preuve qu'un composant est le facteur

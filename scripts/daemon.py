@@ -25,6 +25,7 @@ from agent.targets import Target, load_targets, save_targets, config_for
 from agent.prover import ProofSearchEngine, get_deepseek_balance
 from agent.planner import BlueprintPlanner
 from agent.verifier import RemoteProdVerifier
+from agent.notifier import TelegramNotifier
 from scripts.bounty_report import generate_report
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -68,7 +69,8 @@ def run_daemon(
     daily_budget_usd: float = 0.30,
     prefer_offpeak: bool = False,
     run_once: bool = False,
-    auto_commit: bool = True
+    auto_commit: bool = True,
+    send_digest_now: bool = False
 ):
     print("\n" + "=" * 70)
     print("🤖 AI-Maths-Researcher — Démarrage du Daemon de Production Autonome")
@@ -83,11 +85,35 @@ def run_daemon(
     db = AttemptsDB()
     verifier = RemoteProdVerifier()
     session_cost = 0.0
+    notifier = TelegramNotifier()
+    notified_gates = set()
+    pending_approvals = set()
+    last_digest_day = ""
+
+    if send_digest_now:
+        print("📊 Envoi immédiat du Digest quotidien Telegram demandé via CLI...")
+        q_targets = load_targets(QUEUE_PATH) if QUEUE_PATH.exists() else []
+        cur_bal = get_deepseek_balance()
+        notifier.send_daily_digest(db, q_targets, cur_bal)
 
     while True:
+        # Envoi automatique du Digest quotidien à 20:00 UTC
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        today_str = now_dt.strftime("%Y-%m-%d")
+        if now_dt.hour >= 20 and last_digest_day != today_str:
+            print("📊 Envoi automatique du Digest quotidien Telegram (20:00 UTC)...")
+            q_targets = load_targets(QUEUE_PATH) if QUEUE_PATH.exists() else []
+            cur_bal = get_deepseek_balance()
+            notifier.send_daily_digest(db, q_targets, cur_bal)
+            last_digest_day = today_str
+
         # GATE 1: Kill-Switch STOP
         if STOP_FILE.exists():
-            print("🛑 GATE 1 DÉCLENCHÉE : Fichier 'STOP' détecté. Arrêt d'urgence propre du daemon.")
+            msg = "Fichier 'STOP' détecté. Arrêt d'urgence propre du daemon."
+            print(f"🛑 GATE 1 DÉCLENCHÉE : {msg}")
+            if "stop_file" not in notified_gates:
+                notifier.notify_gate_triggered("FICHIER STOP DÉTECTÉ", msg)
+                notified_gates.add("stop_file")
             break
 
         # GATE 2: Solde API DeepSeek
@@ -95,27 +121,23 @@ def run_daemon(
         if balance is not None:
             print(f"💳 Solde DeepSeek en direct : ${balance:.2f} USD")
             if balance < min_balance_usd:
-                print(f"🛑 GATE 2 DÉCLENCHÉE : Solde insuffisant (${balance:.2f} < ${min_balance_usd:.2f}). Arrêt de sécurité.")
+                msg = f"Solde insuffisant (${balance:.2f} < ${min_balance_usd:.2f} USD). Arrêt de sécurité."
+                print(f"🛑 GATE 2 DÉCLENCHÉE : {msg}")
+                if "low_balance" not in notified_gates:
+                    notifier.notify_gate_triggered("SOLDE API INSUFFISANT", msg)
+                    notified_gates.add("low_balance")
                 break
         else:
             print("ℹ️ Solde DeepSeek non accessible ou clé API absente.")
 
         # GATE 3: Plafond de coût de la session
         if session_cost >= max_session_cost_usd:
-            print(f"🛑 GATE 3 DÉCLENCHÉE : Plafond session de ${max_session_cost_usd:.2f} atteint. Arrêt propre.")
+            msg = f"Plafond session de ${max_session_cost_usd:.2f} USD atteint. Arrêt propre."
+            print(f"🛑 GATE 3 DÉCLENCHÉE : {msg}")
+            if "session_cost" not in notified_gates:
+                notifier.notify_gate_triggered("PLAFOND SESSION ATTEINT", msg)
+                notified_gates.add("session_cost")
             break
-
-        # GATE 3bis: Plafond quotidien roulant 24h (Garantie absolue Tâche 9)
-        rolling_24h_cost = db.get_rolling_cost_usd(24)
-        if rolling_24h_cost >= daily_budget_usd:
-            print(f"🛑 GATE BUDGET 24H DÉCLENCHÉE : Dépense sur 24h (${rolling_24h_cost:.4f} USD) >= plafond quotidien (${daily_budget_usd:.2f} USD).")
-            print("   Mise en veille sécurisée pour borner la dépense à ~$9/mois max.")
-            if run_once:
-                print("🏁 Mode --once : fin d'exécution du daemon (budget 24h atteint).")
-                break
-            print(f"En attente de la prochaine fenêtre budgétaire ({interval_sec}s)...")
-            time.sleep(interval_sec)
-            continue
 
         # Watcher whitelisté (throttlé 24h par défaut)
         try:
@@ -123,6 +145,7 @@ def run_daemon(
             new_watched = check_watchlist()
             if new_watched:
                 print(f"👀 Watcher : {len(new_watched)} nouvelle(s) cible(s) en attente de validation ajoutée(s) au registre.")
+                notifier.notify_watcher_new_targets(new_watched)
         except Exception as e:
             print(f"⚠️ Erreur watcher : {e}")
 
@@ -173,6 +196,57 @@ def run_daemon(
         p_succ = cls_data["p_success"] if cls_data else 0.20
         config = config_for(current_target, p_succ)
         config.min_balance_threshold_usd = min_balance_usd
+
+        # GATE BUDGET 24H & AUTORISATION HUMAINE PAR TELEGRAM (TÂCHE 11)
+        rolling_24h_cost = db.get_rolling_cost_usd(24)
+        est_cost = min(config.budget_usd, 0.03 * config.max_attempts * (2 if config.enable_escalation else 1))
+        remaining_budget = max(0.0, daily_budget_usd - rolling_24h_cost)
+        ev = (p_succ * current_target.value_usd) - est_cost if current_target.value_usd > 0 else (p_succ * 1.0) - est_cost
+
+        # Règle Tâche 11 : Demande d'autorisation si prime > 0, EV positive et coût estimé > budget 24h restant
+        if current_target.value_usd > 0 and not current_target.budget_unlocked and ev > 0 and est_cost > remaining_budget:
+            if current_target.name not in pending_approvals:
+                print(f"🔔 Demande d'autorisation Telegram envoyée pour '{current_target.name}' (prime ${current_target.value_usd:.2f}, coût est. ${est_cost:.2f} > reste ${remaining_budget:.2f}).")
+                notifier.request_budget_approval(current_target.name, current_target.value_usd, p_succ, est_cost)
+                pending_approvals.add(current_target.name)
+
+            action_info = notifier.poll_approvals([current_target.name])
+            if action_info and action_info.get("action") == "approve":
+                print(f"🎉 Approbation reçue de Telegram pour '{current_target.name}' ! Déblocage du budget.")
+                current_target.budget_unlocked = True
+                save_targets(QUEUE_PATH, queue)
+                pending_approvals.discard(current_target.name)
+            elif action_info and action_info.get("action") == "deny":
+                print(f"❌ Refus reçu de Telegram pour '{current_target.name}'. Cible renvoyée en fin de file.")
+                pending_approvals.discard(current_target.name)
+                remaining = queue[1:] + [current_target]
+                save_targets(QUEUE_PATH, remaining)
+                if run_once:
+                    break
+                time.sleep(interval_sec)
+                continue
+            else:
+                print(f"⏳ Cible '{current_target.name}' en attente de réponse Telegram (/approve_{current_target.name} ou /deny_{current_target.name}).")
+                if run_once:
+                    break
+                time.sleep(interval_sec)
+                continue
+
+        # Si le budget 24h est atteint et que la cible n'a pas été débloquée par l'humain : mise en veille
+        if not current_target.budget_unlocked and rolling_24h_cost >= daily_budget_usd:
+            msg = f"Dépense sur 24h (${rolling_24h_cost:.4f} USD) >= plafond quotidien (${daily_budget_usd:.2f} USD). Mise en veille pour borner la dépense à ~$9/mois max."
+            print(f"🛑 GATE BUDGET 24H DÉCLENCHÉE : {msg}")
+            if "daily_budget" not in notified_gates:
+                notifier.notify_gate_triggered("PLAFOND 24H ATTEINT", msg)
+                notified_gates.add("daily_budget")
+            if run_once:
+                print("🏁 Mode --once : fin d'exécution du daemon (budget 24h atteint).")
+                break
+            print(f"En attente de la prochaine fenêtre budgétaire ({interval_sec}s)...")
+            time.sleep(interval_sec)
+            continue
+        else:
+            notified_gates.discard("daily_budget")
 
         engine = ProofSearchEngine(config=config)
         planner = BlueprintPlanner(config=config) if current_target.kind in ("bounty", "mathlib") else None
@@ -235,6 +309,25 @@ def run_daemon(
                 generate_report()
                 db.backup()
 
+                # Notification Telegram Preuve Certifiée (Silencieuse)
+                iterations = 1
+                try:
+                    with db.conn:
+                        c = db.conn.cursor()
+                        c.execute("SELECT iteration FROM attempts WHERE problem_name = ? AND success = 1 ORDER BY id DESC LIMIT 1", (current_target.name,))
+                        row = c.fetchone()
+                        if row:
+                            iterations = row[0]
+                except Exception:
+                    pass
+
+                notifier.notify_proof_certified(
+                    name=current_target.name,
+                    difficulty_class=current_target.difficulty_class,
+                    cost=item_cost,
+                    iterations=iterations
+                )
+
                 if auto_commit:
                     git_commit_proof(current_target.name, item_cost)
             else:
@@ -269,9 +362,10 @@ def main():
     parser.add_argument("--min-balance", type=float, default=0.50, help="Solde minimal DeepSeek USD (default: 0.50)")
     parser.add_argument("--max-cost", type=float, default=5.00, help="Plafond de dépense total de la session (default: 5.00)")
     parser.add_argument("--daily-budget", type=float, default=0.30, help="Plafond quotidien glissant de dépense API USD (default: 0.30)")
-    parser.add_argument("--prefer-offpeak", action="store_true", help="Reporter les tâches Reasoner lourdes en heures creuses DeepSeek (-50%)")
+    parser.add_argument("--prefer-offpeak", action="store_true", help="Reporter les tâches Reasoner lourdes en heures creuses DeepSeek (-50%%)")
     parser.add_argument("--once", action="store_true", help="Traiter un problème de la file puis s'arrêter")
     parser.add_argument("--no-commit", action="store_true", help="Désactiver le commit git automatique")
+    parser.add_argument("--digest", action="store_true", help="Envoyer immédiatement le digest quotidien Telegram au démarrage")
     args = parser.parse_args()
 
     run_daemon(
@@ -281,7 +375,8 @@ def main():
         daily_budget_usd=args.daily_budget,
         prefer_offpeak=args.prefer_offpeak,
         run_once=args.once,
-        auto_commit=not args.no_commit
+        auto_commit=not args.no_commit,
+        send_digest_now=args.digest
     )
 
 if __name__ == "__main__":

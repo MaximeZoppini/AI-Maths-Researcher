@@ -18,6 +18,7 @@ class Target:
     source_url: Optional[str] = None
     submission: Optional[str] = None       # Format / repo cible / instructions
     verified: bool = False                 # Requis : true uniquement si vérifié manuellement ou issu du dataset
+    budget_unlocked: bool = False          # Déblocage de budget explicite accordé via Telegram (/approve)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Target":
@@ -26,6 +27,11 @@ class Target:
             is_verified = raw_v.strip().lower() in ("true", "1", "yes")
         else:
             is_verified = bool(raw_v)
+        raw_b = d.get("budget_unlocked", False)
+        if isinstance(raw_b, str):
+            is_unlocked = raw_b.strip().lower() in ("true", "1", "yes")
+        else:
+            is_unlocked = bool(raw_b)
         return cls(
             name=d["name"],
             statement=d["statement"],
@@ -35,11 +41,12 @@ class Target:
             deadline=d.get("deadline"),
             source_url=d.get("source_url"),
             submission=d.get("submission"),
-            verified=is_verified
+            verified=is_verified,
+            budget_unlocked=is_unlocked
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "name": self.name,
             "statement": self.statement,
             "kind": self.kind,
@@ -50,6 +57,9 @@ class Target:
             "submission": self.submission,
             "verified": self.verified
         }
+        if self.budget_unlocked:
+            d["budget_unlocked"] = True
+        return d
 
 def config_for(target: Target, p_success: float) -> ProverConfig:
     """
